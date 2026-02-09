@@ -1,0 +1,13 @@
+{
+  "solidity.compileUsingRemoteVersion": "v0.8.20",
+  "solidity.defaultCompiler": "remote",
+
+  "solidity.packageDefaultDependenciesDirectory": "node_modules",
+
+  "solidity.contractsDirectory": "contracts",
+
+  "solidity.remappings": [
+    "@openzeppelin/=node_modules/@openzeppelin/"
+],
+"liveServer.settings.multiRootWorkspaceName": "hardhat3"
+}
