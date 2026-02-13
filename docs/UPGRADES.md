@@ -11,7 +11,6 @@
 8. Rollback Strategy
 9. Recommended Workflow
 10. Upgrade Flow Diagram (ASCII)
-11. Upgrade Flow Diagram (PDF)
 
 **When To Upgrade**
 1. Fix critical bugs
