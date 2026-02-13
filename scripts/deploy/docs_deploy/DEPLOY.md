@@ -65,7 +65,7 @@ This repo does not deploy to mainnet. Use Sepolia for public test deployments.
 
 1. Add a Sepolia network entry to `hardhat.config.ts`.
 2. Create a `.env` with your RPC and private key.
-3. Run the [deploy script](../deploy-proxies.ts) on Sepolia.
+3. Run the [deploy script](scripts/deploy/deploy-proxies.ts) on Sepolia.
 
 Example network config:
 ```ts
@@ -100,8 +100,28 @@ npx hardhat run scripts/deploy-proxies.ts --network sepolia
 5. Grants AUTO_GRANT_ROLE to `VoterProgressionUpgradeable`
 6. Unpauses `FundingPoolUpgradeable`, `VotingSystemUpgradeable`, `GrantManagerUpgradeable`
 
+**Deploy Faucet**
+The faucet deploy script deploys `BRTFaucet` and grants it minter permission in `GovernanceTokenUpgradeable`.
+
+Required env vars:
+1. `GOV_TOKEN_PROXY` (governance token proxy address)
+2. `ROLES_REGISTRY_PROXY` (roles registry proxy address)
+
+Optional env vars:
+1. `FAUCET_CLAIM_AMOUNT` (default `10000`, parsed with `ethers.parseEther`)
+2. `FAUCET_COOLDOWN_SEC` (default `86400`)
+
+Run:
+```bash
+GOV_TOKEN_PROXY=<gov_token_proxy> \
+ROLES_REGISTRY_PROXY=<roles_registry_proxy> \
+FAUCET_CLAIM_AMOUNT=10000 \
+FAUCET_COOLDOWN_SEC=86400 \
+npx hardhat run scripts/deploy/deploy-faucet.ts --network localhost
+```
+
 **Upgrade A Proxy**
-The [upgrade script](../upgrade-proxy.ts) deploys a new implementation and upgrades a single proxy via its ProxyAdmin.
+The [upgrade script](scripts/upgrade-proxy.ts) deploys a new implementation and upgrades a single proxy via its ProxyAdmin.
 
 Important:
 1. Use the **proxy address** from `Deployment summary`
@@ -176,7 +196,7 @@ await roles.hasRole(await roles.REPUTATION_MANAGER_ROLE(), "<idea_registry_proxy
 await roles.hasRole(await roles.AUTO_GRANT_ROLE(), "<voter_progression_proxy>");
 ```
 
-4. One-command [verification script](../verify-deploy.ts):
+4. One-command [verification script](scripts/verify-deploy.ts):
 ```bash
 ROLES=<roles_proxy> \
 IDEA=<idea_registry_proxy> \
