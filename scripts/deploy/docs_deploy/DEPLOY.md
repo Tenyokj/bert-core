@@ -101,7 +101,7 @@ npx hardhat run scripts/deploy-proxies.ts --network sepolia
 6. Unpauses `FundingPoolUpgradeable`, `VotingSystemUpgradeable`, `GrantManagerUpgradeable`
 
 **Deploy Faucet**
-The [faucet deploy script](../deploy-faucet.ts) deploys `BRTFaucet` and grants it minter permission in `GovernanceTokenUpgradeable`.
+The [faucet deploy script](../deploy-faucet.ts) deploys `BTKFaucet` and grants it minter permission in `GovernanceTokenUpgradeable`.
 
 Required env vars:
 1. `GOV_TOKEN_PROXY` (governance token proxy address)
