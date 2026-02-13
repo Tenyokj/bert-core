@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0
+// SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 
 import "../DAO/GovernanceTokenUpgradeable.sol";
@@ -6,12 +6,12 @@ import "./Roles/RolesRegistryUpgradeable.sol";
 import "@openzeppelin/contracts/utils/Pausable.sol";
 
 /**
- * @title BRTFaucet
+ * @title BTKFaucet
  * @notice Provides a recurring token distribution mechanism with cooldown periods and admin controls
  * @dev Users can claim a fixed amount of GovernanceToken every `cooldown` seconds. Admin can pause,
  *      adjust claim amount, and modify cooldown duration. Requires minting permissions on token.
  */
-contract BRTFaucet is Pausable {
+contract BTKFaucet is Pausable {
     /// @notice Governance token distributed by the faucet
     GovernanceTokenUpgradeable public immutable token;
 
