@@ -2,8 +2,9 @@
 
 **Deployment**
 1. `scripts/deploy/deploy-proxies.ts` - deploy full protocol with proxies
-2. `scripts/deploy/upgrade-proxy.ts` - upgrade a single proxy
-3. `scripts/deploy/verify-deploy.ts` - post-deploy checks (roles, pause status, params)
+2. `scripts/deploy/deploy-faucet.ts` - deploy BertToken faucet
+3. `scripts/deploy/upgrade-proxy.ts` - upgrade a single proxy
+4. `scripts/deploy/verify-deploy.ts` - post-deploy checks (roles, pause status, params)
 
 **Docs**
 1. `scripts/deploy/docs_deploy/DEPLOY.md` - deployment guide
