@@ -1,4 +1,4 @@
-# BRTFaucet
+# BTKFaucet
 
 **Summary**
 Recurring token faucet with configurable claim amounts and cooldown periods. Users can claim a fixed amount of governance tokens repeatedly, with a mandatory waiting time between claims.
