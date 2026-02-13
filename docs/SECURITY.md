@@ -11,7 +11,6 @@
 8. External Calls
 9. Emergency Checklist
 10. Threat Model Diagram (ASCII)
-11. Threat Model Diagram (PDF)
 
 **Roles And Permissions**
 1. `DEFAULT_ADMIN_ROLE` controls critical parameters and role grants
