@@ -1,12 +1,11 @@
-// test/BRTFaucet.ts
 /**
- * @file BRTFaucet.ts
+ * @file BTKFaucet.ts
  * @notice Faucet claims, cooldown, admin controls, and pause checks.
  */
 import { expect } from "./setup.js";
 import { deployUpgradeable, getConnection } from "./helpers.js";
 
-describe("BRTFaucet", function () {
+describe("BTKFaucet", function () {
   it("validates constructor params", async function () {
     const { ethers } = await getConnection();
     const [admin] = await ethers.getSigners();
@@ -21,7 +20,7 @@ describe("BRTFaucet", function () {
     ]);
 
     await expect(
-      ethers.deployContract("BRTFaucet", [
+      ethers.deployContract("BTKFaucet", [
         ethers.ZeroAddress,
         await roles.getAddress(),
         ethers.parseEther("10000"),
@@ -30,7 +29,7 @@ describe("BRTFaucet", function () {
     ).to.be.revertedWith("Token cannot be zero address");
 
     await expect(
-      ethers.deployContract("BRTFaucet", [
+      ethers.deployContract("BTKFaucet", [
         await token.getAddress(),
         ethers.ZeroAddress,
         ethers.parseEther("10000"),
@@ -39,7 +38,7 @@ describe("BRTFaucet", function () {
     ).to.be.revertedWith("RolesRegistry cannot be zero address");
 
     await expect(
-      ethers.deployContract("BRTFaucet", [
+      ethers.deployContract("BTKFaucet", [
         await token.getAddress(),
         await roles.getAddress(),
         0,
@@ -48,7 +47,7 @@ describe("BRTFaucet", function () {
     ).to.be.revertedWith("Claim amount must be > 0");
 
     await expect(
-      ethers.deployContract("BRTFaucet", [
+      ethers.deployContract("BTKFaucet", [
         await token.getAddress(),
         await roles.getAddress(),
         ethers.parseEther("10000"),
@@ -70,7 +69,7 @@ describe("BRTFaucet", function () {
       await roles.getAddress(),
     ]);
 
-    const faucet = await ethers.deployContract("BRTFaucet", [
+    const faucet = await ethers.deployContract("BTKFaucet", [
       await token.getAddress(),
       await roles.getAddress(),
       ethers.parseEther("10000"),
@@ -105,7 +104,7 @@ describe("BRTFaucet", function () {
       await roles.getAddress(),
     ]);
 
-    const faucet = await ethers.deployContract("BRTFaucet", [
+    const faucet = await ethers.deployContract("BTKFaucet", [
       await token.getAddress(),
       await roles.getAddress(),
       ethers.parseEther("10000"),
