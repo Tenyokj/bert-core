@@ -15,7 +15,6 @@
 12. Data Dependencies
 13. User Journey (At A Glance)
 14. Diagram (ASCII)
-15. Diagram (PDF)
 
 **System Flow**
 1. Users submit ideas in `IdeaRegistryUpgradeable`
