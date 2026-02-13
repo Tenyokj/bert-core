@@ -1,7 +1,6 @@
-// scripts/deploy/deploy-faucet.ts
 /**
  * @file deploy-faucet.ts
- * @notice Deploys BRTFaucet and grants minter permission in GovernanceToken.
+ * @notice Deploys BTKFaucet and grants minter permission in GovernanceToken.
  * @dev Run: npx hardhat run scripts/deploy/deploy-faucet.ts --network localhost
  */
 import { hre } from "../../test/setup.js";
@@ -19,7 +18,7 @@ async function main() {
   if (!tokenAddress) throw new Error("Missing GOV_TOKEN_PROXY");
   if (!rolesAddress) throw new Error("Missing ROLES_REGISTRY_PROXY");
 
-  const faucet = await ethers.deployContract("BRTFaucet", [
+  const faucet = await ethers.deployContract("BTKFaucet", [
     tokenAddress,
     rolesAddress,
     ethers.parseEther(claimAmount),
@@ -36,7 +35,7 @@ async function main() {
   );
   await token.setMinter(faucetAddress, true);
 
-  console.log("BRTFaucet:", faucetAddress);
+  console.log("BTKFaucet:", faucetAddress);
   console.log("Minter granted to faucet in GovernanceToken");
 }
 
