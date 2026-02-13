@@ -34,6 +34,9 @@ npx hardhat node
 ```bash
 npx hardhat run scripts/deploy/deploy-proxies.ts --network localhost
 ```
+```bash
+npx hardhat run scripts/deploy/deploy-faucet.ts --network localhost
+```
 
 **Sepolia Setup**
 1. Copy `.env.example` to `.env`
@@ -42,4 +45,7 @@ npx hardhat run scripts/deploy/deploy-proxies.ts --network localhost
 **Deploy (Sepolia)**
 ```bash
 npx hardhat run scripts/deploy/deploy-proxies.ts --network sepolia
+```
+```bash
+npx hardhat run scripts/deploy/deploy-faucet.ts --network sepolia
 ```
