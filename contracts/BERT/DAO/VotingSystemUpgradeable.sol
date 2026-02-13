@@ -20,7 +20,7 @@ import "../utils/Errors.sol";
  * @dev Handles token-staked voting, round management, and winner determination
  * @dev Pausable, Upgradeable
  * 
- * @custom:version 1.0.0
+ * @custom:version 1.0.1
  */
 contract VotingSystemUpgradeable is 
     Initializable, 
