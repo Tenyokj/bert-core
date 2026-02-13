@@ -45,9 +45,6 @@ contract VotingSystemUpgradeable is
 
     /* ========== CONSTANTS ========== */
 
-    /// @notice Cooldown period between rounds in seconds (10 minutes)
-    uint256 public constant ROUND_COOLDOWN = 10 minutes;
-    
     /// @notice Maximum voters allowed per idea in a round (protects endVotingRound gas usage)
     uint256 public constant MAX_VOTERS_PER_IDEA = 30;
 
@@ -138,18 +135,6 @@ contract VotingSystemUpgradeable is
         _;
     }
 
-    /**
-     * @notice Verifies that cooldown period has passed since last round
-     * @custom:requires Cooldown period must have passed since last round ended
-     */
-    modifier cooldownPassed() {
-        uint256 cooldownEnd = lastRoundEnd + ROUND_COOLDOWN;
-        if (block.timestamp < cooldownEnd) {
-            revert CooldownNotPassed(lastRoundEnd, cooldownEnd); 
-        }
-        _;
-    }
-
     /* ========== INITIALIZE ========== */
 
     constructor() {
@@ -204,20 +189,18 @@ contract VotingSystemUpgradeable is
         emit VotingSystemInitialized(msg.sender);
     }
 
-    /* ========== EXTERNAL FUNCTIONS ========== */
+   /* ========== EXTERNAL FUNCTIONS ========== */
 
     /**
      * @notice Starts a new voting round (anyone can call)
      * @dev Sets up round parameters, validates included ideas, and updates their status
      * @custom:emits VotingRoundStarted
-     * @custom:requires Cooldown period must have passed since last round
      * @custom:requires Enough new ideas must be available (≥ IDEAS_PER_ROUND)
      * @custom:reentrancy protected
      */
     function startVotingRound() 
         external 
-        nonReentrant 
-        cooldownPassed 
+        nonReentrant  
         whenNotPaused 
     {
         uint256 totalIdeas = ideaRegistry.totalIdeas();
@@ -284,6 +267,7 @@ contract VotingSystemUpgradeable is
      * @custom:emits VoteCast
      * @custom:requires Round id must be > 0 
      * @custom:requires Idea must exists
+     * @custom:requires Cannot vote for own idea
      * @custom:requires Round must exist and be active
      * @custom:requires Voting must be within round time window
      * @custom:requires Voter hasn't voted in this round
@@ -327,6 +311,11 @@ contract VotingSystemUpgradeable is
         
         if (!r.isIdeaInRound[ideaId]) {
             revert IdeaNotInRound(roundId, ideaId);
+        }
+
+        address ideaAuthor = ideaRegistry.getIdeaAuthor(ideaId);
+        if (msg.sender == ideaAuthor) {
+            revert CannotVoteForOwnIdea(msg.sender, ideaId);
         }
         
         if (r.votersForIdea[ideaId].length >= MAX_VOTERS_PER_IDEA) {
@@ -399,8 +388,7 @@ contract VotingSystemUpgradeable is
             }
             r.ended = true;
             r.active = false;
-            // Update last round end timestamp
-            lastRoundEnd = block.timestamp;
+
             emit VotingRoundEnded(roundId, 0, 0);
             return 0;
         }
@@ -444,9 +432,6 @@ contract VotingSystemUpgradeable is
                 }
             }
         }
-
-        // Update last round end timestamp
-        lastRoundEnd = block.timestamp; 
 
         emit VotingRoundEnded(roundId, winningIdeaId, highestVotes);
     }
@@ -588,7 +573,7 @@ contract VotingSystemUpgradeable is
     }
 
     /**
-     * @notice Checks if a round can be started (cooldown passed and enough ideas)
+     * @notice Checks if a round can be started (enough ideas)
      * @return canStart True if a new round can be started
      * @return reason Human-readable reason if cannot start
      */
@@ -599,12 +584,7 @@ contract VotingSystemUpgradeable is
             bool canStart, 
             string memory reason
         ) 
-    {
-        uint256 cooldownEnd = lastRoundEnd + ROUND_COOLDOWN;
-        if (block.timestamp < cooldownEnd) {
-            return (false, "Cooldown period not passed");
-        }
-        
+    {   
         uint256 totalIdeas = ideaRegistry.totalIdeas();
         uint256 availableIdeas = totalIdeas - lastUsedIdeaId;
         if (availableIdeas < IDEAS_PER_ROUND) {
