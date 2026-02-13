@@ -11,23 +11,19 @@ import { HDNodeWallet } from "ethers";
 
 /** @notice describe: VotingSystemUpgradeable */
 describe("VotingSystemUpgradeable", function () {
-  /** @notice it: starts rounds when enough ideas and cooldown passed */
-  it("starts rounds when enough ideas and cooldown passed", async function () {
+  /** @notice it: starts rounds when enough ideas */
+  it("starts rounds when enough ideas", async function () {
     const {
       admin,
       ideaRegistry,
       votingSystem,
       fundingPool,
-      networkHelpers,
     } = await deploySystem();
 
     await fundingPool.connect(admin).unpause();
     await votingSystem.connect(admin).unpause();
 
     await createIdeas(ideaRegistry, admin, 30);
-
-    const now = await networkHelpers.time.latest();
-    await networkHelpers.time.increaseTo(now + 700);
 
     await expect(votingSystem.startVotingRound())
       .to.emit(votingSystem, "VotingRoundStarted");
@@ -57,7 +53,16 @@ describe("VotingSystemUpgradeable", function () {
     await expect(
       votingSystem.connect(user1).vote(1, 1, 1)
     ).to.be.revertedWithCustomError(votingSystem, "InsufficientStake");
+
+    const minStake = await votingSystem.minStake();
+
+    await expect(
+      votingSystem.connect(admin).vote(1, 1, minStake)
+    )
+      .to.be.revertedWithCustomError(votingSystem, "CannotVoteForOwnIdea")
+      .withArgs(admin.address, 1n);
   });
+
 
   /** @notice it: "casts votes */
   it("casts votes, tracks voters, and ends rounds with winner", async function () {
@@ -141,8 +146,8 @@ describe("VotingSystemUpgradeable", function () {
 
 /** @notice describe: VotingSystemUpgradeable edge cases */
 describe("VotingSystemUpgradeable edge cases", function () {
-  /** @notice it: enforces pause and cooldown */
-  it("enforces pause and cooldown", async function () {
+  /** @notice it: enforces pause */
+  it("enforces pause", async function () {
     const { admin, ideaRegistry, votingSystem, networkHelpers } =
       await deploySystem();
 
@@ -153,14 +158,9 @@ describe("VotingSystemUpgradeable edge cases", function () {
 
     await votingSystem.connect(admin).unpause();
 
-    await votingSystem.startVotingRound();
+   await expect(votingSystem.startVotingRound())
+      .to.emit(votingSystem, "VotingRoundStarted");
 
-    const roundInfo = await votingSystem.getRoundInfo(1);
-    await networkHelpers.time.increaseTo(Number(roundInfo[3]) + 1);
-    await votingSystem.endVotingRound(1);
-
-    await expect(votingSystem.startVotingRound())
-      .to.be.revertedWithCustomError(votingSystem, "CooldownNotPassed");
   });
 
   /** @notice it: rejects start when not enough ideas */
