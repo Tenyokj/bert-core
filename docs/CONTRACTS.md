@@ -13,6 +13,6 @@ Access control and services:
 4. [VoterProgressionUpgradeable](../contracts/BERT/docs_contracts/VoterProgressionUpgradeable.md)
 
 Supporting contracts and types:
-1. [Airdrop](../contracts/BERT/docs_contracts/Airdrop.md)
+1. [BTKFaucet](../contracts/BERT/docs_contracts/BTKFaucet.md)
 2. [IdeaStatus](../contracts/BERT/docs_contracts/IdeaStatus.md)
 3. [Errors](../contracts/BERT/docs_contracts/Errors.md)
