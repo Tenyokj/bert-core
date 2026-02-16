@@ -33,9 +33,9 @@ Note: Please read the Contract [Documentation](https://docs.bert.dao) before int
 See: [docs/CONTRACTS.md](docs/CONTRACTS.md)
 
 **Learn More**
-1. Documentation: [link](https://docs.bert.dao)
-2. Frontend repository: [link](https://github.com/tenyokj/bert-front)
-3. Additional repositories: [link]()
+1. Documentation: [website](https://bertdao-docs.vercel.app/)
+2. Documentation repository: [repository](https://github.com/Tenyokj/bert-docs)
+3. Main site: [website](https://bertdao.vercel.app)
 
 **Protocol Docs**
 1. Architecture: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
