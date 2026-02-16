@@ -10,7 +10,7 @@ is an upgradeable DAO voting & grant system that turns community proposals into 
 
 Users can create proposals in the Idea Registry, participate in structured voting rounds, and see winners funded through the pool. Reputation and voter progression reward consistent contributors, while role-based permissions protect critical actions.
 
-Note: Please read the Contract [Documentation](https://docs.bert.dao) before integrating with this repo.
+Note: Please read the Contract [Documentation](https://bertdao-docs.vercel.app) before integrating with this repo.
 
 **Key Features**
 1. End-to-end grant flow: ideas -> voting -> funding -> distribution
@@ -33,7 +33,7 @@ Note: Please read the Contract [Documentation](https://docs.bert.dao) before int
 See: [docs/CONTRACTS.md](docs/CONTRACTS.md)
 
 **Learn More**
-1. Documentation: [website](https://bertdao-docs.vercel.app/)
+1. Documentation: [website](https://bertdao-docs.vercel.app)
 2. Documentation repository: [repository](https://github.com/Tenyokj/bert-docs)
 3. Main site: [website](https://bertdao.vercel.app)
 
