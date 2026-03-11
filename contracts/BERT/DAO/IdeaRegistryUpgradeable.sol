@@ -9,6 +9,7 @@ import { IReputationSystem } from "../interfaces/IReputationSystem.sol";
 import { IVoterProgression } from "../interfaces/IVoterProgression.sol";
 import "../utils/IdeaStatus.sol";
 import "../utils/Errors.sol";
+
 /**
  * @title IdeaRegistry
  * @notice Central registry for storing and managing ideas within the DAO ecosystem
