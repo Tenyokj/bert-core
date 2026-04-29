@@ -209,10 +209,15 @@ async function main() {
 
   console.log("✅ Roles configured");
 
-  console.log("\n3) Unpausing system contracts...");
+  console.log("\n3) Wiring contract references...");
   const fundingPoolContract = await ethers.getContractAt(
     "FundingPoolUpgradeable",
     fundingPool.proxyAddress,
+    deployer
+  );
+  const ideaRegistryContract = await ethers.getContractAt(
+    "IdeaRegistryUpgradeable",
+    ideaRegistry.proxyAddress,
     deployer
   );
   const votingSystemContract = await ethers.getContractAt(
@@ -226,6 +231,11 @@ async function main() {
     deployer
   );
 
+  await ideaRegistryContract.setFundingPool(fundingPool.proxyAddress);
+
+  console.log("✅ Contract references configured");
+
+  console.log("\n4) Unpausing system contracts...");
   await fundingPoolContract.unpause();
   await votingSystemContract.unpause();
   await grantManagerContract.unpause();

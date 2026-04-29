@@ -18,7 +18,7 @@ import "../utils/Errors.sol";
  * @dev Orchestrates the complete DAO grant lifecycle from creation to funding
  * @dev Pausable, Upgradeable
  * 
- * @custom:version 1.0.0
+ * @custom:version 1.1.0
  */
 contract GrantManagerUpgradeable is 
     Initializable, 
@@ -44,6 +44,111 @@ contract GrantManagerUpgradeable is
      *@dev Default is 95% 
      */
     uint256 public authorSharePercent; // 95%
+
+    /* ========== PAYOUT CONSTANTS ========== */
+
+    /// @notice First tranche released immediately after the winning author claims the grant
+    /// @dev Expressed as a percentage of the author's reserved share
+    uint256 public constant INITIAL_PAYOUT_PERCENT = 30;
+
+    /// @notice Second tranche released after the in-process milestone is approved
+    /// @dev Expressed as a percentage of the author's reserved share
+    uint256 public constant IN_PROCESS_PAYOUT_PERCENT = 40;
+
+    /// @notice Minimum waiting period before a rejected milestone can be submitted again
+    /// @dev Applies independently per round and per milestone stage
+    uint256 public constant MILESTONE_RESUBMIT_COOLDOWN = 48 hours;
+
+    /* ========== MILESTONE CONSTANTS ========== */
+
+    /// @notice Milestone identifier for the "project is in active implementation" proof stage
+    uint8 public constant IN_PROCESS_STAGE = 1;
+
+    /// @notice Milestone identifier for the "project is fully delivered" proof stage
+    uint8 public constant COMPLETION_STAGE = 2;
+
+    /// @notice Minimum number of approvals required to unlock the 40% in-process payout
+    uint8 public constant IN_PROCESS_APPROVAL_THRESHOLD = 3;
+
+    /// @notice Maximum number of reviewer votes collected for the in-process stage
+    uint8 public constant IN_PROCESS_MAX_REVIEWERS = 5;
+
+    /// @notice Minimum number of approvals required to unlock the final 30% payout
+    uint8 public constant COMPLETION_APPROVAL_THRESHOLD = 2;
+
+    /// @notice Maximum number of reviewer votes collected for the completion stage
+    uint8 public constant COMPLETION_MAX_REVIEWERS = 3;
+
+    /* ========== STRUCTS ========== */
+
+    /**
+     * @notice Tracks the staged payout state for a funded round
+     * @dev Flow:
+     *      1. `totalGrant` is set when the author claims the winning round
+     *      2. `released` increases after every successful payout tranche
+     *      3. boolean flags prevent the same tranche from being paid twice
+     * @param ideaId Winning idea for the round
+     * @param author Author entitled to receive the grant tranches
+     * @param totalGrant Total author-side grant reserved after protocol share is carved out
+     * @param released Cumulative amount already transferred to the author
+     * @param initialClaimed True once the initial 30% payout has been executed
+     * @param inProcessPaid True once the 40% in-process milestone payout has been executed
+     * @param completionPaid True once the final 30% completion payout has been executed
+     */
+    struct GrantPayout {
+        uint256 ideaId;
+        address author;
+        uint256 totalGrant;
+        uint256 released;
+        bool initialClaimed;
+        bool inProcessPaid;
+        bool completionPaid;
+    }
+
+    /**
+     * @notice Stores the currently active or most recently settled milestone request for a stage
+     * @dev Flow:
+     *      1. the author submits a request with proof metadata
+     *      2. reviewers cast approvals or rejections until the request resolves
+     *      3. the request becomes inactive after approval or rejection
+     *      4. `lastRejectedAt` gates resubmission via cooldown enforcement
+     * @param requestId Monotonic identifier for submissions on the same round/stage
+     * @param metadataURI Off-chain pointer with rich proof payloads
+     * @param details Human-readable summary shown to reviewers and indexers
+     * @param submittedAt Timestamp when the current request version was created
+     * @param lastRejectedAt Timestamp of the latest rejected request for cooldown tracking
+     * @param approvals Number of reviewer approvals collected for the active request
+     * @param rejections Number of reviewer rejections collected for the active request
+     * @param maxReviewers Maximum number of reviewer votes allowed for the stage
+     * @param approvalThreshold Number of approvals needed for acceptance
+     * @param active Whether this request can still receive votes
+     */
+    struct MilestoneRequest {
+        uint256 requestId;
+        string metadataURI;
+        string details;
+        uint256 submittedAt;
+        uint256 lastRejectedAt;
+        uint8 approvals;
+        uint8 rejections;
+        uint8 maxReviewers;
+        uint8 approvalThreshold;
+        bool active;
+    }
+
+    /* ========== STORAGE ========== */
+
+    /// @notice Round-level payout state keyed by voting round ID
+    /// @dev roundId => staged payout state
+    mapping(uint256 => GrantPayout) private _grantPayouts;
+
+    /// @notice Latest milestone request state for each round and payout stage
+    /// @dev roundId => stage => request data
+    mapping(uint256 => mapping(uint8 => MilestoneRequest)) private _milestoneRequests;
+
+    /// @notice Tracks whether a reviewer has already voted on a specific milestone request version
+    /// @dev keccak(roundId, stage, requestId) => reviewer => voted
+    mapping(bytes32 => mapping(address => bool)) private _milestoneVotes;
 
     /* ========== INITIALIZE ========== */
 
@@ -103,24 +208,21 @@ contract GrantManagerUpgradeable is
      * @custom:requires Caller must be the author of the winning idea
      */
     function claimGrant(uint256 roundId) external nonReentrant whenNotPaused {
-        // Check if funds have already been distributed for this round
-        if (fundingPool.isDistributed(roundId)) {
+        GrantPayout storage payout = _grantPayouts[roundId];
+        if (payout.initialClaimed || fundingPool.isDistributed(roundId)) {
             revert AlreadyDistributed(roundId);
         }
 
-        // Get the information about this round
         (, , , , , bool ended , , , ) = votingSystem.getRoundInfo(roundId);
         if (!ended) {
             revert RoundNotEnded(roundId);
         }
 
-        // Get the winning idea for this round
         (uint256 winningIdeaId, ) = votingSystem.getRoundWinner(roundId);
         if (winningIdeaId == 0) {
             revert NoWinner(roundId);
         }
 
-        // Verify the idea is in the correct status
         IdeaStatus currentStatus = ideaRegistry.getStatus(winningIdeaId);
         if (currentStatus != IdeaStatus.WonVoting) {
             revert IdeaNotEligible(
@@ -130,7 +232,6 @@ contract GrantManagerUpgradeable is
             );
         }
 
-        // Get and verify the author
         address author = ideaRegistry.getIdeaAuthor(winningIdeaId);
         if (author == address(0)) {
             revert InvalidAuthor();
@@ -139,21 +240,153 @@ contract GrantManagerUpgradeable is
             revert NotAuthor(msg.sender, author);
         }
 
-        // Calculate distribution amounts
         uint256 totalIdeaStake = fundingPool.poolByRoundAndIdea(roundId, winningIdeaId);
         if (totalIdeaStake == 0) {
             revert NoFundsAllocated(roundId, winningIdeaId);
         }
         uint256 authorAmount = (totalIdeaStake * authorSharePercent) / 100;
+        uint256 protocolAmount = totalIdeaStake - authorAmount;
+        uint256 initialPayout = (authorAmount * INITIAL_PAYOUT_PERCENT) / 100;
         
-        // Update idea status to Funded (status 3)
+        try fundingPool.moveIdeaFundsToReserve(roundId, winningIdeaId, protocolAmount) {
+            // success
+        } catch {
+            revert ExternalCallFailed("FundingPool", "moveIdeaFundsToReserve");
+        }
+
         ideaRegistry.updateStatus(winningIdeaId, IdeaStatus.Funded);
 
-        try fundingPool.distributeFunds(roundId, winningIdeaId, authorAmount) {
-            // Success - emit event
-            emit RoundFunded(roundId, winningIdeaId, authorAmount);
+        try fundingPool.distributeFunds(roundId, winningIdeaId, initialPayout) {
+            payout.ideaId = winningIdeaId;
+            payout.author = author;
+            payout.totalGrant = authorAmount;
+            payout.released = initialPayout;
+            payout.initialClaimed = true;
+
+            emit RoundFunded(roundId, winningIdeaId, initialPayout);
         } catch {
             revert ExternalCallFailed("FundingPool", "distributeFunds");
+        }
+    }
+
+    /**
+     * @notice Submits proof for the next eligible milestone payout stage
+     * @dev The author can only have one active request per stage at a time.
+     *      Stage configuration is derived on-chain:
+     *      - stage 1 (`IN_PROCESS_STAGE`) => 3 approvals out of max 5 reviewers
+     *      - stage 2 (`COMPLETION_STAGE`) => 2 approvals out of max 3 reviewers
+     * @param roundId The ID of the funding round
+     * @param stage Milestone stage identifier
+     * @param metadataURI Off-chain metadata pointer with proof materials
+     * @param details Short human-readable summary of the submission
+     */
+    function submitMilestoneProof(
+        uint256 roundId,
+        uint8 stage,
+        string memory metadataURI,
+        string memory details
+    ) external nonReentrant whenNotPaused {
+        if (bytes(metadataURI).length == 0) {
+            revert ZeroLength("metadataURI");
+        }
+
+        GrantPayout storage payout = _grantPayouts[roundId];
+        if (!payout.initialClaimed) {
+            revert MilestoneNotEligible(roundId, stage);
+        }
+        if (msg.sender != payout.author) {
+            revert NotAuthor(msg.sender, payout.author);
+        }
+
+        MilestoneRequest storage request = _milestoneRequests[roundId][stage];
+        if (request.active) {
+            revert MilestoneRequestActive(roundId, stage);
+        }
+
+        _validateMilestoneSubmission(roundId, stage, payout.ideaId, request.lastRejectedAt);
+
+        request.requestId += 1;
+        request.metadataURI = metadataURI;
+        request.details = details;
+        request.submittedAt = block.timestamp;
+        request.approvals = 0;
+        request.rejections = 0;
+        request.active = true;
+
+        if (stage == IN_PROCESS_STAGE) {
+            request.maxReviewers = IN_PROCESS_MAX_REVIEWERS;
+            request.approvalThreshold = IN_PROCESS_APPROVAL_THRESHOLD;
+        } else if (stage == COMPLETION_STAGE) {
+            request.maxReviewers = COMPLETION_MAX_REVIEWERS;
+            request.approvalThreshold = COMPLETION_APPROVAL_THRESHOLD;
+        } else {
+            revert MilestoneNotEligible(roundId, stage);
+        }
+
+        emit MilestoneProofSubmitted(roundId, payout.ideaId, stage, request.requestId);
+    }
+
+    /**
+     * @notice Reviews the active milestone proof request for a round
+     * @dev Any address with `REVIEWER_ROLE` may participate until the reviewer cap is reached.
+     *      The request resolves as soon as:
+     *      - approvals reach the configured threshold, or
+     *      - rejections make approval mathematically impossible, or
+     *      - the reviewer cap is exhausted
+     * @param roundId The ID of the funding round
+     * @param stage Milestone stage identifier
+     * @param approved True to approve the request, false to reject
+     */
+    function reviewMilestoneProof(
+        uint256 roundId,
+        uint8 stage,
+        bool approved
+    ) external nonReentrant whenNotPaused onlyReviewer {
+        GrantPayout storage payout = _grantPayouts[roundId];
+        if (!payout.initialClaimed) {
+            revert MilestoneNotEligible(roundId, stage);
+        }
+        if (msg.sender == payout.author) {
+            revert CannotReviewOwnIdea(payout.author);
+        }
+
+        MilestoneRequest storage request = _milestoneRequests[roundId][stage];
+        if (!request.active) {
+            revert NoActiveMilestoneRequest(roundId, stage);
+        }
+
+        if (request.approvals + request.rejections >= request.maxReviewers) {
+            revert ReviewerLimitReached(roundId, stage, request.maxReviewers);
+        }
+
+        bytes32 voteKey = keccak256(abi.encodePacked(roundId, stage, request.requestId));
+        if (_milestoneVotes[voteKey][msg.sender]) {
+            revert MilestoneAlreadyReviewed(roundId, stage, msg.sender);
+        }
+
+        _milestoneVotes[voteKey][msg.sender] = true;
+
+        if (approved) {
+            request.approvals += 1;
+        } else {
+            request.rejections += 1;
+        }
+
+        emit MilestoneReviewed(roundId, stage, msg.sender, approved);
+
+        if (request.approvals >= request.approvalThreshold) {
+            _approveMilestone(roundId, stage, payout, request);
+            return;
+        }
+
+        uint8 rejectionThreshold = request.maxReviewers - request.approvalThreshold + 1;
+        if (
+            request.rejections >= rejectionThreshold ||
+            request.approvals + request.rejections >= request.maxReviewers
+        ) {
+            request.active = false;
+            request.lastRejectedAt = block.timestamp;
+            emit MilestoneRejected(roundId, payout.ideaId, stage, request.requestId);
         }
     }
 
@@ -197,7 +430,7 @@ contract GrantManagerUpgradeable is
             string memory reason
         ) 
     {
-        if (fundingPool.isDistributed(roundId)) {
+        if (_grantPayouts[roundId].initialClaimed || fundingPool.isDistributed(roundId)) {
             return (false, "Grant already distributed");
         }
 
@@ -258,6 +491,88 @@ contract GrantManagerUpgradeable is
      */
     function getProtocolShare() external view returns (uint256) {
         return 100 - authorSharePercent;
+    }
+
+    /**
+     * @notice Returns payout tracking information for a round
+     * @param roundId The ID of the funding round
+     * @return ideaId Winning idea linked to the payout state
+     * @return author Author entitled to receive payouts
+     * @return totalGrant Total grant reserved for the author
+     * @return released Total amount already released to the author
+     * @return initialClaimed Whether the initial claim has already happened
+     * @return inProcessPaid Whether the in-process tranche has been paid
+     * @return completionPaid Whether the completion tranche has been paid
+     */
+    function getGrantPayout(uint256 roundId)
+        external
+        view
+        returns (
+            uint256 ideaId,
+            address author,
+            uint256 totalGrant,
+            uint256 released,
+            bool initialClaimed,
+            bool inProcessPaid,
+            bool completionPaid
+        )
+    {
+        GrantPayout storage payout = _grantPayouts[roundId];
+        return (
+            payout.ideaId,
+            payout.author,
+            payout.totalGrant,
+            payout.released,
+            payout.initialClaimed,
+            payout.inProcessPaid,
+            payout.completionPaid
+        );
+    }
+
+    /**
+     * @notice Returns the latest milestone request state for a round and stage
+     * @param roundId The ID of the funding round
+     * @param stage Milestone stage identifier
+     * @return requestId Sequential identifier for the current request version
+     * @return metadataURI Off-chain pointer to milestone proof payload
+     * @return details Human-readable proof summary
+     * @return submittedAt Timestamp when the request was submitted
+     * @return lastRejectedAt Timestamp of the previous rejection for cooldown tracking
+     * @return approvals Number of approvals collected so far
+     * @return rejections Number of rejections collected so far
+     * @return maxReviewers Reviewer cap configured for the selected stage
+     * @return approvalThreshold Number of approvals required for acceptance
+     * @return active Whether the request is still open for review
+     */
+    function getMilestoneRequest(uint256 roundId, uint8 stage)
+        external
+        view
+        returns (
+            uint256 requestId,
+            string memory metadataURI,
+            string memory details,
+            uint256 submittedAt,
+            uint256 lastRejectedAt,
+            uint8 approvals,
+            uint8 rejections,
+            uint8 maxReviewers,
+            uint8 approvalThreshold,
+            bool active
+        )
+    {
+        MilestoneRequest storage request = _milestoneRequests[roundId][stage];
+        return (
+            request.requestId,
+            request.metadataURI,
+            request.details,
+            request.submittedAt,
+            request.lastRejectedAt,
+            request.approvals,
+            request.rejections,
+            request.maxReviewers,
+            request.approvalThreshold,
+            request.active
+        );
     }
 
     /* ========== ADMIN FUNCTIONS ========== */
@@ -354,6 +669,105 @@ contract GrantManagerUpgradeable is
         return paused();
     }
 
+    /* ========== INTERNAL FUNCTIONS ========== */
+
+    /**
+     * @notice Validates whether a milestone submission can be created for the given stage
+     * @dev This function enforces the grant flow:
+     *      - stage 1 is available only after initial funding and only while the idea is `Funded`
+     *      - stage 2 is available only after the in-process tranche was paid and only while the idea is `InProcess`
+     *      - rejected requests must respect the resubmission cooldown
+     * @param roundId Round identifier
+     * @param stage Milestone stage identifier
+     * @param ideaId Winning idea identifier
+     * @param lastRejectedAt Timestamp of the last rejection for this stage
+     */
+    function _validateMilestoneSubmission(
+        uint256 roundId,
+        uint8 stage,
+        uint256 ideaId,
+        uint256 lastRejectedAt
+    ) internal view {
+        if (stage == IN_PROCESS_STAGE) {
+            if (_grantPayouts[roundId].inProcessPaid || ideaRegistry.getStatus(ideaId) != IdeaStatus.Funded) {
+                revert MilestoneNotEligible(roundId, stage);
+            }
+        } else if (stage == COMPLETION_STAGE) {
+            if (_grantPayouts[roundId].completionPaid || !_grantPayouts[roundId].inProcessPaid) {
+                revert MilestoneNotEligible(roundId, stage);
+            }
+            if (ideaRegistry.getStatus(ideaId) != IdeaStatus.InProcess) {
+                revert MilestoneNotEligible(roundId, stage);
+            }
+        } else {
+            revert MilestoneNotEligible(roundId, stage);
+        }
+
+        if (lastRejectedAt != 0) {
+            uint256 retryAt = lastRejectedAt + MILESTONE_RESUBMIT_COOLDOWN;
+            if (block.timestamp < retryAt) {
+                revert MilestoneCooldownActive(roundId, stage, retryAt);
+            }
+        }
+    }
+
+    /**
+     * @notice Finalizes an approved milestone and releases the corresponding payout tranche
+     * @dev Also advances the idea lifecycle in `IdeaRegistry`:
+     *      - approved stage 1 moves the idea into `InProcess`
+     *      - approved stage 2 marks the idea as `Completed`
+     * @param roundId Round identifier
+     * @param stage Milestone stage identifier
+     * @param payout Stored payout data for the round
+     * @param request Stored milestone request data for the round/stage
+     */
+    function _approveMilestone(
+        uint256 roundId,
+        uint8 stage,
+        GrantPayout storage payout,
+        MilestoneRequest storage request
+    ) internal {
+        uint256 amount = _milestoneAmount(payout.totalGrant, stage);
+
+        try fundingPool.distributeFunds(roundId, payout.ideaId, amount) {
+            payout.released += amount;
+            request.active = false;
+
+            if (stage == IN_PROCESS_STAGE) {
+                payout.inProcessPaid = true;
+                ideaRegistry.updateStatus(payout.ideaId, IdeaStatus.InProcess);
+            } else {
+                payout.completionPaid = true;
+                ideaRegistry.markAsCompleted(payout.ideaId);
+            }
+
+            emit MilestoneApproved(roundId, payout.ideaId, stage, amount);
+        } catch {
+            revert ExternalCallFailed("FundingPool", "distributeFunds");
+        }
+    }
+
+    /**
+     * @notice Returns the author payout amount for a given milestone stage
+     * @dev Stage 2 is computed as the remainder to avoid rounding drift across the 30/40/30 split
+     * @param totalGrant Total author grant reserved for the round
+     * @param stage Milestone stage identifier
+     * @return uint256 Amount to release for the given stage
+     */
+    function _milestoneAmount(uint256 totalGrant, uint8 stage) internal pure returns (uint256) {
+        uint256 initialPayout = (totalGrant * INITIAL_PAYOUT_PERCENT) / 100;
+        uint256 inProcessPayout = (totalGrant * IN_PROCESS_PAYOUT_PERCENT) / 100;
+
+        if (stage == IN_PROCESS_STAGE) {
+            return inProcessPayout;
+        }
+        if (stage == COMPLETION_STAGE) {
+            return totalGrant - initialPayout - inProcessPayout;
+        }
+
+        return 0;
+    }
+
     /* ========== UPGRADE SAFETY ========== */
 
     /**
@@ -364,5 +778,5 @@ contract GrantManagerUpgradeable is
      * @custom:upgrade-safety Always include 50 slots gap in upgradeable contracts
      * @custom:warning Do not remove or reduce this gap in future versions
      */
-    uint256[50] private __gap;
+    uint256[47] private __gap;
 }

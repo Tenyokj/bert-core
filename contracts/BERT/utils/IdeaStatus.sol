@@ -41,5 +41,11 @@ enum IdeaStatus {
      * @notice Idea has completed its funded project
      * @dev Final terminal state - project delivered
      */
-    Completed
+    Completed,
+
+    /**
+     * @notice Idea is in active development after the initial grant payout
+     * @dev Intermediate milestone state used for staged grant release
+     */
+    InProcess
 }

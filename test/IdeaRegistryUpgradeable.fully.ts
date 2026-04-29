@@ -6,7 +6,7 @@
 
 import { expect } from "./setup.js";
 
-import { deploySystem } from "./helpers.js";
+import { deploySystem, deployUpgradeable } from "./helpers.js";
 
 /** @notice describe: IdeaRegistry */
 describe("IdeaRegistry", function () {
@@ -17,7 +17,7 @@ describe("IdeaRegistry", function () {
       const { ideaRegistry, reputationSystem, user1 } = await deploySystem();
       
       await expect(
-        ideaRegistry.connect(user1).createIdea("Test Idea", "Detailed description", "https://example.com")
+        ideaRegistry.connect(user1).createIdea("Test Idea", "Detailed description", "https://example.com", 1n)
       )
         .to.emit(ideaRegistry, "IdeaCreated")
         .withArgs(1n, user1.address, "Test Idea");
@@ -41,23 +41,73 @@ describe("IdeaRegistry", function () {
       const { ideaRegistry, user1 } = await deploySystem();
       
       await expect(
-        ideaRegistry.connect(user1).createIdea("", "Description", "")
+        ideaRegistry.connect(user1).createIdea("", "Description", "", 1n)
       ).to.be.revertedWithCustomError(ideaRegistry, "ZeroLength")
         .withArgs("title");
       
       await expect(
-        ideaRegistry.connect(user1).createIdea("Title", "", "")
+        ideaRegistry.connect(user1).createIdea("Title", "", "", 1n)
       ).to.be.revertedWithCustomError(ideaRegistry, "ZeroLength")
         .withArgs("description");
+    });
+
+    /** @notice it: should validate funding pool and minimum stake requirements */
+    it("should validate funding pool configuration and minimum stake", async function () {
+      const { admin, user1, ideaRegistry, fundingPool, reputationSystem, voterProgression, roles, ethers } = await deploySystem();
+
+      const freshRegistry = await deployUpgradeable(ethers, admin, "IdeaRegistryUpgradeable", [
+        await reputationSystem.getAddress(),
+        await voterProgression.getAddress(),
+        await roles.getAddress(),
+      ]);
+      await expect(
+        freshRegistry.connect(user1).createIdea("Title", "Description", "", 1n)
+      ).to.be.revertedWithCustomError(freshRegistry, "FundingPoolNotConfigured");
+
+      await ideaRegistry.setFundingPool(await fundingPool.getAddress());
+      await ideaRegistry.setAuthorMinStake(5n);
+
+      await expect(
+        ideaRegistry.connect(user1).createIdea("Title", "Description", "", 1n)
+      ).to.be.revertedWithCustomError(ideaRegistry, "InsufficientStake")
+        .withArgs(1n, 5n);
+    });
+
+    /** @notice it: should validate token balance and allowance before locking author stake */
+    it("should validate token balance and allowance before locking author stake", async function () {
+      const { admin, user1, ideaRegistry, fundingPool, governanceToken } = await deploySystem();
+
+      await ideaRegistry.setFundingPool(await fundingPool.getAddress());
+      await ideaRegistry.setAuthorMinStake(100001n);
+
+      await expect(
+        ideaRegistry.connect(user1).createIdea("Title", "Description", "", 100001n)
+      ).to.be.revertedWithCustomError(ideaRegistry, "InsufficientTokenBalance")
+        .withArgs(100000n, 100001n);
+
+      await ideaRegistry.setAuthorMinStake(1n);
+      await governanceToken.connect(user1).approve(await fundingPool.getAddress(), 0n);
+
+      await expect(
+        ideaRegistry.connect(user1).createIdea("Title", "Description", "", 10n)
+      ).to.be.revertedWithCustomError(ideaRegistry, "InsufficientAllowance")
+        .withArgs(0n, 10n);
+
+      await governanceToken.connect(user1).approve(await fundingPool.getAddress(), 9n);
+
+      await expect(
+        ideaRegistry.connect(user1).createIdea("Title", "Description", "", 10n)
+      ).to.be.revertedWithCustomError(ideaRegistry, "InsufficientAllowance")
+        .withArgs(9n, 10n);
     });
     
     /** @notice it: should increment idea counter */
     it("should increment idea counter", async function () {
       const { ideaRegistry, user1 } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Idea 1", "Desc 1", "");
-      await ideaRegistry.connect(user1).createIdea("Idea 2", "Desc 2", "");
-      await ideaRegistry.connect(user1).createIdea("Idea 3", "Desc 3", "");
+      await ideaRegistry.connect(user1).createIdea("Idea 1", "Desc 1", "", 1n);
+      await ideaRegistry.connect(user1).createIdea("Idea 2", "Desc 2", "", 1n);
+      await ideaRegistry.connect(user1).createIdea("Idea 3", "Desc 3", "", 1n);
       
       expect(await ideaRegistry.totalIdeas()).to.equal(3n);
     });
@@ -70,7 +120,7 @@ describe("IdeaRegistry", function () {
       const { ideaRegistry, user1, admin, roles } = await deploySystem();
       
       // Создаем идею
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       // Даем админу роли
       const VOTING_ROLE = await roles.VOTING_ROLE();
@@ -95,7 +145,12 @@ describe("IdeaRegistry", function () {
         .to.emit(ideaRegistry, "IdeaStatusUpdated")
         .withArgs(1n, 3);
       
-      // Funded → Completed
+      // Funded -> InProcess
+      await expect(ideaRegistry.connect(admin).updateStatus(1, 6))
+        .to.emit(ideaRegistry, "IdeaStatusUpdated")
+        .withArgs(1n, 6);
+
+      // InProcess -> Completed
       await expect(ideaRegistry.connect(admin).updateStatus(1, 5))
         .to.emit(ideaRegistry, "IdeaStatusUpdated")
         .withArgs(1n, 5);
@@ -105,7 +160,7 @@ describe("IdeaRegistry", function () {
     it("should reject invalid status transitions", async function () {
       const { ideaRegistry, user1, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -128,7 +183,7 @@ describe("IdeaRegistry", function () {
     it("should reject status update to same status", async function () {
       const { ideaRegistry, user1, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -144,7 +199,7 @@ describe("IdeaRegistry", function () {
     it("should require VOTING_ROLE or GRANT_ROLE to update status", async function () {
       const { ideaRegistry, user1, user2 } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       await expect(
         ideaRegistry.connect(user2).updateStatus(1, 1)
@@ -158,7 +213,7 @@ describe("IdeaRegistry", function () {
     it("should add votes only in voting status", async function () {
       const { ideaRegistry, user1, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -183,7 +238,7 @@ describe("IdeaRegistry", function () {
     it("should not add zero votes", async function () {
       const { ideaRegistry, user1, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -198,7 +253,7 @@ describe("IdeaRegistry", function () {
     it("should require VOTING_ROLE to add votes", async function () {
       const { ideaRegistry, user1, user2 } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       await expect(
         ideaRegistry.connect(user2).addVote(1, 100)
@@ -212,7 +267,7 @@ describe("IdeaRegistry", function () {
     it("should allow curators to mark ideas as low quality", async function () {
       const { ideaRegistry, user1, user2, admin, roles, voterProgression } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -227,12 +282,31 @@ describe("IdeaRegistry", function () {
       
       expect((await ideaRegistry.getIdeaStruct(1)).isLowQuality).to.be.true;
     });
+
+    /** @notice it: should reject marking an idea low quality twice */
+    it("should reject marking an idea low quality twice", async function () {
+      const { ideaRegistry, user1, user2, admin, roles, voterProgression } = await deploySystem();
+
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
+
+      const VOTING_ROLE = await roles.VOTING_ROLE();
+      await roles.grantSystemRole(VOTING_ROLE, admin.address);
+      await ideaRegistry.connect(admin).updateStatus(1, 1);
+
+      await voterProgression.grantCuratorRole(user2.address);
+      await ideaRegistry.connect(user2).markLowQuality(1);
+
+      await expect(
+        ideaRegistry.connect(user2).markLowQuality(1)
+      ).to.be.revertedWithCustomError(ideaRegistry, "IdeaAlreadyLowQuality")
+        .withArgs(1n);
+    });
     
     /** @notice it: should not allow self-marking as low quality */
     it("should not allow self-marking as low quality", async function () {
       const { ideaRegistry, user1, admin, roles, voterProgression } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -250,7 +324,7 @@ describe("IdeaRegistry", function () {
     it("should require CURATOR_ROLE to mark low quality", async function () {
       const { ideaRegistry, user1, user2, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -265,7 +339,7 @@ describe("IdeaRegistry", function () {
     it("should allow reviewers to add reviews", async function () {
       const { ideaRegistry, user1, user2, admin, roles, voterProgression } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -288,7 +362,7 @@ describe("IdeaRegistry", function () {
     it("should require REVIEWER_ROLE to add reviews", async function () {
       const { ideaRegistry, user1, user2, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -302,11 +376,11 @@ describe("IdeaRegistry", function () {
   
   /** @notice describe: Completion */
   describe("Completion", function () {
-    /** @notice it: should allow author to mark funded idea as completed */
-    it("should allow author to mark funded idea as completed", async function () {
+    /** @notice it: should allow grant manager to mark in-process idea as completed */
+    it("should allow grant manager to mark in-process idea as completed", async function () {
       const { ideaRegistry, user1, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       const GRANT_ROLE = await roles.GRANT_ROLE();
@@ -317,20 +391,20 @@ describe("IdeaRegistry", function () {
       await ideaRegistry.connect(admin).updateStatus(1, 1); // Voting
       await ideaRegistry.connect(admin).updateStatus(1, 2); // WonVoting
       await ideaRegistry.connect(admin).updateStatus(1, 3); // Funded
+      await ideaRegistry.connect(admin).updateStatus(1, 6); // InProcess
       
-      // Автор может отметить как завершенную
-      await expect(ideaRegistry.connect(user1).markAsCompleted(1))
+      await expect(ideaRegistry.connect(admin).markAsCompleted(1))
         .to.emit(ideaRegistry, "IdeaStatusUpdated")
         .withArgs(1n, 5); // Completed
       
       expect(await ideaRegistry.getStatus(1)).to.equal(5);
     });
     
-    /** @notice it: should not allow non-author to mark as completed */
-    it("should not allow non-author to mark as completed", async function () {
+    /** @notice it: should not allow non-grant manager to mark as completed */
+    it("should not allow non-grant manager to mark as completed", async function () {
       const { ideaRegistry, user1, user2, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
       const GRANT_ROLE = await roles.GRANT_ROLE();
@@ -340,25 +414,28 @@ describe("IdeaRegistry", function () {
       await ideaRegistry.connect(admin).updateStatus(1, 1);
       await ideaRegistry.connect(admin).updateStatus(1, 2);
       await ideaRegistry.connect(admin).updateStatus(1, 3);
+      await ideaRegistry.connect(admin).updateStatus(1, 6);
       
       await expect(
         ideaRegistry.connect(user2).markAsCompleted(1)
-      ).to.be.revertedWithCustomError(ideaRegistry, "NotAuthor");
+      ).to.be.revertedWithCustomError(ideaRegistry, "NotGrantManager");
     });
     
-    /** @notice it: should require funded status to mark as completed */
-    it("should require funded status to mark as completed", async function () {
+    /** @notice it: should require in-process status to mark as completed */
+    it("should require in-process status to mark as completed", async function () {
       const { ideaRegistry, user1, admin, roles } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       const VOTING_ROLE = await roles.VOTING_ROLE();
+      const GRANT_ROLE = await roles.GRANT_ROLE();
       await roles.grantSystemRole(VOTING_ROLE, admin.address);
+      await roles.grantSystemRole(GRANT_ROLE, admin.address);
       
       await ideaRegistry.connect(admin).updateStatus(1, 1); // Voting
       
       await expect(
-        ideaRegistry.connect(user1).markAsCompleted(1)
+        ideaRegistry.connect(admin).markAsCompleted(1)
       ).to.be.revertedWithCustomError(ideaRegistry, "NotInCorrectStatus");
     });
   });
@@ -369,9 +446,9 @@ describe("IdeaRegistry", function () {
     it("should return ideas by author", async function () {
       const { ideaRegistry, user1, user2 } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Idea 1", "Desc 1", "");
-      await ideaRegistry.connect(user1).createIdea("Idea 2", "Desc 2", "");
-      await ideaRegistry.connect(user2).createIdea("Idea 3", "Desc 3", "");
+      await ideaRegistry.connect(user1).createIdea("Idea 1", "Desc 1", "", 1n);
+      await ideaRegistry.connect(user1).createIdea("Idea 2", "Desc 2", "", 1n);
+      await ideaRegistry.connect(user2).createIdea("Idea 3", "Desc 3", "", 1n);
       
       const user1Ideas = await ideaRegistry.getIdeasByAuthor(user1.address);
       const user2Ideas = await ideaRegistry.getIdeasByAuthor(user2.address);
@@ -388,7 +465,7 @@ describe("IdeaRegistry", function () {
     it("should return author of idea", async function () {
       const { ideaRegistry, user1 } = await deploySystem();
       
-      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "");
+      await ideaRegistry.connect(user1).createIdea("Test", "Desc", "", 1n);
       
       expect(await ideaRegistry.getIdeaAuthor(1)).to.equal(user1.address);
     });
@@ -418,21 +495,24 @@ describe("IdeaRegistryUpgradeable edge cases", function () {
   it("rejects updateStatus from unauthorized caller", async function () {
     const { user1, user2, ideaRegistry } = await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     await expect(
       ideaRegistry.connect(user2).updateStatus(1, 1)
     ).to.be.revertedWithCustomError(ideaRegistry, "NotVotingOrGrant");
   });
 
-  /** @notice it: rejects markAsCompleted when not funded */
-  it("rejects markAsCompleted when not funded", async function () {
-    const { user1, ideaRegistry } = await deploySystem();
+  /** @notice it: rejects markAsCompleted when not in process */
+  it("rejects markAsCompleted when not in process", async function () {
+    const { admin, user1, ideaRegistry, roles } = await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    const GRANT_ROLE = await roles.GRANT_ROLE();
+    await roles.grantSystemRole(GRANT_ROLE, admin.address);
+
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     await expect(
-      ideaRegistry.connect(user1).markAsCompleted(1)
+      ideaRegistry.connect(admin).markAsCompleted(1)
     ).to.be.revertedWithCustomError(ideaRegistry, "NotInCorrectStatus");
   });
 
@@ -441,7 +521,7 @@ describe("IdeaRegistryUpgradeable edge cases", function () {
     const { admin, user1, user2, ideaRegistry, voterProgression, roles } =
       await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     await voterProgression.grantCuratorRole(user2.address);
     await voterProgression.grantReviewerRole(user2.address);
@@ -470,7 +550,7 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
   it("handles invalid IDs and GRANT_ROLE access on updateStatus", async function () {
     const { admin, user1, ideaRegistry, roles } = await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     const GRANT_ROLE = await roles.GRANT_ROLE();
     await roles.grantSystemRole(GRANT_ROLE, admin.address);
@@ -492,7 +572,7 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
   it("allows Voting -> Rejected transition", async function () {
     const { admin, user1, ideaRegistry, roles } = await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     const VOTING_ROLE = await roles.VOTING_ROLE();
     await roles.grantSystemRole(VOTING_ROLE, admin.address);
@@ -508,7 +588,7 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
   it("rejects addVote for invalid IDs and non-voting caller", async function () {
     const { admin, user1, ideaRegistry, roles } = await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     await expect(
       ideaRegistry.connect(user1).addVote(1, 1)
@@ -531,7 +611,7 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
     const { admin, user1, ideaRegistry, voterProgression, roles } =
       await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     await voterProgression.grantCuratorRole(user1.address);
     await voterProgression.grantReviewerRole(user1.address);
@@ -555,10 +635,13 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
 
   /** @notice it: rejects markAsCompleted for invalid ID */
   it("rejects markAsCompleted for invalid ID", async function () {
-    const { user1, ideaRegistry } = await deploySystem();
+    const { admin, ideaRegistry, roles } = await deploySystem();
+
+    const GRANT_ROLE = await roles.GRANT_ROLE();
+    await roles.grantSystemRole(GRANT_ROLE, admin.address);
 
     await expect(
-      ideaRegistry.connect(user1).markAsCompleted(0)
+      ideaRegistry.connect(admin).markAsCompleted(0)
     ).to.be.revertedWithCustomError(ideaRegistry, "IdeaDoesNotExist");
   });
 
@@ -566,7 +649,7 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
   it("returns view data for author and idea structs", async function () {
     const { user1, ideaRegistry } = await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     const ideas = await ideaRegistry.getIdeasByAuthor(user1.address);
     expect(ideas.length).to.equal(1);
@@ -584,7 +667,7 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
   it("rejects invalid transitions for each stage", async function () {
     const { admin, user1, ideaRegistry, roles } = await deploySystem();
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
 
     const VOTING_ROLE = await roles.VOTING_ROLE();
     const GRANT_ROLE = await roles.GRANT_ROLE();
@@ -626,7 +709,7 @@ describe("IdeaRegistryUpgradeable extra coverage", function () {
       .to.be.revertedWithCustomError(ideaRegistry, "IdeaDoesNotExist")
       .withArgs(1n);
 
-    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "");
+    await ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n);
     const reviews = await ideaRegistry.getIdeaReviews(1);
     expect(reviews.length).to.equal(0);
   });

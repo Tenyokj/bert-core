@@ -6,7 +6,9 @@ import "../utils/IdeaStatus.sol";
 /**
  * @title IIdeaRegistry
  * @notice Interface for IdeaRegistry contract - central registry for storing and managing ideas
- * @dev Provides external function declarations and event definitions for idea lifecycle management
+ * @dev Provides external function declarations and event definitions for idea lifecycle management.
+ *      In v1.1.0 idea creation requires an author stake and funded ideas move through
+ *      the milestone-aware flow `WonVoting -> Funded -> InProcess -> Completed`.
  */
 interface IIdeaRegistry {
     /* ========== EVENTS ========== */
@@ -66,19 +68,34 @@ interface IIdeaRegistry {
      */
     event VoterProgressionUpdated(address newVoterProgression);
 
+    /**
+     * @notice Emitted when FundingPool address is updated
+     * @param newFundingPool New FundingPool contract address
+     */
+    event FundingPoolUpdated(address newFundingPool);
+
+    /**
+     * @notice Emitted when the minimum author stake is updated
+     * @param newAuthorMinStake New minimum stake amount
+     */
+    event AuthorMinStakeUpdated(uint256 newAuthorMinStake);
+
     /* ========== IDEA MANAGEMENT FUNCTIONS ========== */
 
     /**
      * @notice Creates a new idea entry
-     * @dev Idea starts with Pending status and zero votes. Initializes author's reputation if needed.
+     * @dev Idea starts with Pending status and zero votes. Initializes author's reputation if needed
+     *      and locks the author's stake in the FundingPool before the idea is stored.
      * @param _title Title of the idea
      * @param _description Detailed description of the idea
      * @param _link Optional external link (can be empty string)
+     * @param _amount Amount of governance tokens to stake on idea creation
      */
     function createIdea(
         string memory _title,
         string memory _description,
-        string memory _link
+        string memory _link,
+        uint256 _amount
     ) external;
 
     /**
@@ -117,6 +134,7 @@ interface IIdeaRegistry {
 
     /**
      * @notice Marks idea status as completed (when the author implements his idea)
+     * @dev Used by GrantManager after the final milestone payout is approved
      * @param ideaId ID of the idea to mark
      */
     function markAsCompleted(uint256 ideaId) external;
@@ -196,4 +214,18 @@ interface IIdeaRegistry {
      * @param _newVoterProgression New VoterProgression contract address
      */
     function setVoterProgression(address _newVoterProgression) external;
+
+    /**
+     * @notice Updates the FundingPool contract address
+     * @dev Only callable by contract admin
+     * @param _newFundingPool New FundingPool contract address
+     */
+    function setFundingPool(address _newFundingPool) external;
+
+    /**
+     * @notice Updates the minimum author stake amount
+     * @dev Only callable by contract admin
+     * @param _newAuthorMinStake New minimum stake amount
+     */
+    function setAuthorMinStake(uint256 _newAuthorMinStake) external;
 }

@@ -15,6 +15,9 @@ import hardhatVerify from "@nomicfoundation/hardhat-verify";
 
 import type { HardhatUserConfig } from "hardhat/config";
 
+const sepoliaRpcUrl = process.env.SEPOLIA_RPC_URL;
+const deployerKey = process.env.DEPLOYER_KEY;
+
 const config: HardhatUserConfig = {
   solidity: {
     version: "0.8.28",
@@ -37,14 +40,17 @@ const config: HardhatUserConfig = {
       type: "http",          // for a local node via RPC
       url: process.env.LOCAL_RPC_URL ?? "http://127.0.0.1:8545",
       chainId: 31337,
-    }
-    ,
-    sepolia: {
-      type: "http",
-      url: process.env.SEPOLIA_RPC_URL ?? "",
-      chainId: 11155111,
-      accounts: process.env.DEPLOYER_KEY ? [process.env.DEPLOYER_KEY] : [],
     },
+    ...(sepoliaRpcUrl
+      ? {
+          sepolia: {
+            type: "http" as const,
+            url: sepoliaRpcUrl,
+            chainId: 11155111,
+            accounts: deployerKey ? [deployerKey] : [],
+          },
+        }
+      : {}),
   },
  
   plugins: [

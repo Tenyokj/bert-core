@@ -131,4 +131,44 @@ describe("BTKFaucet", function () {
     await faucet.connect(admin).unpause();
     expect(await faucet.isPaused()).to.equal(false);
   });
+
+  it("reports canClaim before first claim and while paused", async function () {
+    const { ethers } = await getConnection();
+    const [admin, user] = await ethers.getSigners();
+
+    const roles = await deployUpgradeable(ethers, admin, "RolesRegistryUpgradeable", []);
+    const token = await deployUpgradeable(ethers, admin, "GovernanceTokenUpgradeable", [
+      "GovToken",
+      "GOV",
+      ethers.parseEther("100000000"),
+      admin.address,
+      await roles.getAddress(),
+    ]);
+
+    const faucet = await ethers.deployContract("BTKFaucet", [
+      await token.getAddress(),
+      await roles.getAddress(),
+      ethers.parseEther("10000"),
+      86400,
+    ]);
+
+    expect(await faucet.canClaim(user.address)).to.deep.equal([true, 0n]);
+
+    await token.setMinter(await faucet.getAddress(), true);
+    await faucet.connect(user).claim();
+
+    const pending = await faucet.canClaim(user.address);
+    expect(pending[0]).to.equal(false);
+    expect(pending[1]).to.be.gt(0n);
+
+    await ethers.provider.send("evm_increaseTime", [86401]);
+    await ethers.provider.send("evm_mine", []);
+
+    const readyAgain = await faucet.canClaim(user.address);
+    expect(readyAgain[0]).to.equal(true);
+    expect(readyAgain[1]).to.be.gt(0n);
+
+    await faucet.connect(admin).pause();
+    expect(await faucet.canClaim(user.address)).to.deep.equal([false, 0n]);
+  });
 });

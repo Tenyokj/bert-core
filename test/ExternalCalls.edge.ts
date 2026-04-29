@@ -17,9 +17,22 @@ describe("External call failure paths", function () {
     await roles.revokeSystemRole(REPUTATION_MANAGER_ROLE, await ideaRegistry.getAddress());
 
     await expect(
-      ideaRegistry.connect(user1).createIdea("Idea", "Desc", "")
+      ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n)
     ).to.be.revertedWithCustomError(ideaRegistry, "ExternalCallFailed")
       .withArgs("ReputationSystem", "initializeReputation");
+  });
+
+  /** @notice it: IdeaRegistry reverts ExternalCallFailed when funding pool deposit path fails */
+  it("IdeaRegistry reverts ExternalCallFailed when funding pool deposit path fails", async function () {
+    const { user1, ideaRegistry, roles } = await deploySystem();
+
+    const IREGISTRY_ROLE = await roles.IREGISTRY_ROLE();
+    await roles.revokeSystemRole(IREGISTRY_ROLE, await ideaRegistry.getAddress());
+
+    await expect(
+      ideaRegistry.connect(user1).createIdea("Idea", "Desc", "", 1n)
+    ).to.be.revertedWithCustomError(ideaRegistry, "ExternalCallFailed")
+      .withArgs("FundingPool", "depositAuthorStakeFrom");
   });
 
   /** @notice it: VotingSystem vote reverts ExternalCallFailed when funding pool paused */
@@ -175,6 +188,6 @@ describe("External call failure paths", function () {
 
     await expect(grantManager.connect(user1).claimGrant(1))
       .to.be.revertedWithCustomError(grantManager, "ExternalCallFailed")
-      .withArgs("FundingPool", "distributeFunds");
+      .withArgs("FundingPool", "moveIdeaFundsToReserve");
   });
 });

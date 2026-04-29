@@ -3,10 +3,12 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
 import "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import { IERC20 } from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import { RolesAwareUpgradeable } from "../extensions/Roles/RolesAwareUpgradeable.sol";
 import { IIdeaRegistry } from "../interfaces/IIdeaRegistry.sol";
 import { IReputationSystem } from "../interfaces/IReputationSystem.sol";
 import { IVoterProgression } from "../interfaces/IVoterProgression.sol";
+import { IFundingPool } from "../interfaces/IFundingPool.sol";
 import "../utils/IdeaStatus.sol";
 import "../utils/Errors.sol";
 
@@ -16,7 +18,7 @@ import "../utils/Errors.sol";
  * @dev Manages idea lifecycle, metadata, status transitions, and voting data
  * @dev Upgradeable
  * 
- * @custom:version 1.0.0
+ * @custom:version 1.1.1
  */
 contract IdeaRegistryUpgradeable is 
     Initializable,
@@ -37,8 +39,6 @@ contract IdeaRegistryUpgradeable is
      * @dev Used to track voter progression for winning votes
      */
     IVoterProgression public voterProgression;
-
-    /* ========== STATE VARIABLES ========== */
 
     /**
      * @notice Counter for generating unique idea IDs
@@ -84,7 +84,8 @@ contract IdeaRegistryUpgradeable is
 
     /* ========== STORAGE ========== */
 
-    /// @dev Mapping from idea ID to Idea struct
+    /// @notice Canonical storage for every registered idea
+    /// @dev ideaId => Idea
     mapping(uint256 => Idea) public ideas;
 
     /**
@@ -93,8 +94,19 @@ contract IdeaRegistryUpgradeable is
      */
     mapping(uint256 => Review[]) public ideaReviews;
     
-    /// @dev Mapping from author address to array of their idea IDs
+    /// @notice Reverse index of idea IDs authored by each address
+    /// @dev author => ideaIds[]
     mapping(address => uint256[]) public authorIdeas;
+
+    /**
+     * @notice FundingPool contract interface
+     * @dev Appended in v1.1.1 to preserve the original proxy storage layout
+     */
+    IFundingPool public fundingPool;
+
+    /// @notice Minimum amount authors must stake to create an idea
+    /// @dev Appended in v1.1.1 to preserve the original proxy storage layout
+    uint256 public authorMinStake;
 
     /* ========== INITIALIZE ========== */
 
@@ -128,36 +140,105 @@ contract IdeaRegistryUpgradeable is
         reputationSystem = IReputationSystem(_reputationSystem);
         voterProgression = IVoterProgression(_voterProgression);
         _ideaIdCounter = 1;
+        authorMinStake = 5000 * 10**18;
         
         emit IdeaRegistryInitialized(msg.sender);
+    }
+
+    /**
+     * @notice Initializes V2-specific storage introduced after the original proxy deployment
+     * @dev Must be executed immediately after upgrading an existing v1 proxy.
+     *      Appending new storage and using a reinitializer prevents storage-slot collisions
+     *      with the original `_ideaIdCounter` and mappings.
+     * @param _fundingPool Address of the FundingPool contract
+     * @param _authorMinStake Minimum amount authors must stake to create an idea
+     */
+    function initializeV2(
+        address _fundingPool,
+        uint256 _authorMinStake
+    ) public reinitializer(2) {
+        if (_fundingPool == address(0)) {
+            revert ZeroAddress("fundingPool");
+        }
+        if (_authorMinStake == 0) {
+            revert ZeroAmount();
+        }
+
+        fundingPool = IFundingPool(_fundingPool);
+        authorMinStake = _authorMinStake;
+
+        emit FundingPoolUpdated(_fundingPool);
+        emit AuthorMinStakeUpdated(_authorMinStake);
     }
 
     /* ========== EXTERNAL FUNCTIONS ========== */
 
     /**
-     * @notice Creates a new idea entry
+     * @notice Creates a new idea and locks the author's stake in the funding pool
      * @dev Idea starts with Pending status and zero votes. Initializes author's reputation if needed.
      * @param _title Title of the idea
      * @param _description Detailed description of the idea
      * @param _link Optional external link (can be empty string)
+     * @param _amount Amount to stake on idea creation
      * @custom:emits IdeaCreated
      * @custom:requires _title cannot be empty
      * @custom:requires _description cannot be empty
-     * @custom:reentrancy nonReentrant (если нужно, можно добавить)
+     * @custom:requires _amount >= authorMinStake
      */
     function createIdea(
         string memory _title,
         string memory _description,
-        string memory _link
-    ) external nonReentrant{
+        string memory _link,
+        uint256 _amount
+    ) external nonReentrant {
+        _createIdea(_title, _description, _link, _amount);
+    }
+
+    /* ========== INTERNAL FUNCTIONS ========== */
+
+    /**
+     * @notice Internal idea creation flow shared by the external entrypoint
+     * @dev Flow:
+     *      1. validate metadata and stake amount
+     *      2. ensure the funding pool is configured
+     *      3. lazily initialize author reputation if needed
+     *      4. lock the author's stake inside the funding pool
+     *      5. store the new idea in `Pending` status
+     * @param _title Title of the idea
+     * @param _description Detailed description of the idea
+     * @param _link Optional external link
+     * @param _amount Amount to stake on idea creation
+     */
+    function _createIdea(
+        string memory _title,
+        string memory _description,
+        string memory _link,
+        uint256 _amount
+    ) internal {
         if (bytes(_title).length == 0) {
             revert ZeroLength("title");
         }
         if (bytes(_description).length == 0) {
             revert ZeroLength("description");
         }
+        if (address(fundingPool) == address(0)) {
+            revert FundingPoolNotConfigured();
+        }
+        if (_amount < authorMinStake) {
+            revert InsufficientStake(_amount, authorMinStake);
+        }
 
-        // Initialize reputation if not already initialized
+        IERC20 token = IERC20(fundingPool.governanceToken());
+        uint256 balance = token.balanceOf(msg.sender);
+        if (balance < _amount) {
+            revert InsufficientTokenBalance(balance, _amount);
+        }
+
+        uint256 allowance = token.allowance(msg.sender, address(fundingPool));
+        if (allowance < _amount) {
+            revert InsufficientAllowance(allowance, _amount);
+        }
+
         if (!reputationSystem.isInitialized(msg.sender)) {
             try reputationSystem.initializeReputation(msg.sender) {
                 // success
@@ -167,6 +248,12 @@ contract IdeaRegistryUpgradeable is
         }
 
         uint256 newId = _ideaIdCounter;
+
+        try fundingPool.depositAuthorStakeFrom(msg.sender, newId, _amount) {
+            // success
+        } catch {
+            revert ExternalCallFailed("FundingPool", "depositAuthorStakeFrom");
+        }
 
         ideas[newId] = Idea({
             id: newId,
@@ -188,7 +275,10 @@ contract IdeaRegistryUpgradeable is
 
     /**
      * @notice Updates the status of an existing idea
-     * @dev Only callable by authorized roles (Voting System or Grant Manager)
+     * @dev Only callable by authorized roles (Voting System or Grant Manager).
+     *      The state machine is intentionally strict:
+     *      `Pending -> Voting -> WonVoting/Rejected -> Funded -> InProcess -> Completed`
+     *      Rejected and completed ideas are terminal.
      * @param ideaId ID of the idea to update
      * @param newStatus New status for the idea
      * @custom:emits IdeaStatusUpdated
@@ -209,33 +299,41 @@ contract IdeaRegistryUpgradeable is
             revert StatusUnchanged(current);
         }
 
-        // Pending → Voting
         if (current == IdeaStatus.Pending) {
             if (newStatus != IdeaStatus.Voting) {
                 revert InvalidTransition(current, newStatus);
             }
         }
-        // Voting → WonVoting | Rejected
         else if (current == IdeaStatus.Voting) {
             if (newStatus != IdeaStatus.WonVoting && newStatus != IdeaStatus.Rejected) {
                 revert InvalidTransition(current, newStatus);
             }
         }
-        // WonVoting → Funded
         else if (current == IdeaStatus.WonVoting) {
             if (newStatus != IdeaStatus.Funded) {
                 revert InvalidTransition(current, newStatus);
             }
         }
-        // Funded → Completed
         else if (current == IdeaStatus.Funded) {
+            if (newStatus != IdeaStatus.InProcess) {
+                revert InvalidTransition(current, newStatus);
+            }
+        }
+        else if (current == IdeaStatus.InProcess) {
             if (newStatus != IdeaStatus.Completed) {
                 revert InvalidTransition(current, newStatus);
             }
         }
-        // Rejected / Completed are terminal states
         else {
             revert TerminalStatus(current);
+        }
+
+        if (newStatus == IdeaStatus.Rejected) {
+            try fundingPool.slashAuthorStakeToReserve(ideaId) {
+                // success
+            } catch {
+                revert ExternalCallFailed("FundingPool", "slashAuthorStakeToReserve");
+            }
         }
 
         ideas[ideaId].status = newStatus;
@@ -335,25 +433,21 @@ contract IdeaRegistryUpgradeable is
     }
 
     /**
-     * @notice Marks idea status as completed (when the author implements his idea)
+     * @notice Marks idea status as completed after grant milestone approval
      * @param ideaId ID of the idea to mark
      * @custom:emits IdeaStatusUpdated
-     * @custom:requires Msg.sender is the author of the idea
-     * @custom:requires Idea status is marked as Funded
+     * @custom:requires Caller has GRANT_ROLE
+     * @custom:requires Idea status is marked as InProcess
      */
-    function markAsCompleted(uint256 ideaId) external {
+    function markAsCompleted(uint256 ideaId) external onlyGrantManager {
         if (ideaId == 0 || ideaId >= _ideaIdCounter) {
             revert IdeaDoesNotExist(ideaId);
         }
         
         Idea storage idea = ideas[ideaId];
-        
-        if (msg.sender != idea.author) {
-            revert NotAuthor(msg.sender, idea.author);
-        }
-        
-        if (idea.status != IdeaStatus.Funded) {
-            revert NotInCorrectStatus(IdeaStatus.Funded, idea.status);
+
+        if (idea.status != IdeaStatus.InProcess) {
+            revert NotInCorrectStatus(IdeaStatus.InProcess, idea.status);
         }
 
         ideas[ideaId].status = IdeaStatus.Completed;
@@ -507,6 +601,34 @@ contract IdeaRegistryUpgradeable is
         emit VoterProgressionUpdated(_newVoterProgression);
     }
 
+    /**
+     * @notice Updates the FundingPool contract address
+     * @dev Only callable by contract admin
+     * @dev Required for author stake locking and rejection slashing flow
+     * @param _newFundingPool New FundingPool contract address
+     */
+    function setFundingPool(address _newFundingPool) external onlyAdmin {
+        if (_newFundingPool == address(0)) {
+            revert ZeroAddress("newFundingPool");
+        }
+        fundingPool = IFundingPool(_newFundingPool);
+        emit FundingPoolUpdated(_newFundingPool);
+    }
+
+    /**
+     * @notice Updates the minimum author stake amount
+     * @dev Only callable by contract admin.
+     *      All future idea submissions must stake at least this amount.
+     * @param _newAuthorMinStake New minimum stake amount
+     */
+    function setAuthorMinStake(uint256 _newAuthorMinStake) external onlyAdmin {
+        if (_newAuthorMinStake == 0) {
+            revert ZeroAmount();
+        }
+        authorMinStake = _newAuthorMinStake;
+        emit AuthorMinStakeUpdated(_newAuthorMinStake);
+    }
+
     /* ========== UPGRADE SAFETY ========== */
 
     /**
@@ -517,5 +639,5 @@ contract IdeaRegistryUpgradeable is
      * @custom:upgrade-safety Always include 50 slots gap in upgradeable contracts
      * @custom:warning Do not remove or reduce this gap in future versions
      */
-    uint256[50] private __gap;
+    uint256[48] private __gap;
 }

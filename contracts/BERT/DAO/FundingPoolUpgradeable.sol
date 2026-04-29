@@ -17,7 +17,7 @@ import "../utils/Errors.sol";
  * @dev Handles donor balances, fund safekeeping, and controlled distribution
  * @dev Pausable, Upgradeable
  * 
- * @custom:version 1.0.0
+ * @custom:version 1.1.1
  */
 contract FundingPoolUpgradeable is 
     Initializable, 
@@ -73,6 +73,10 @@ contract FundingPoolUpgradeable is
     
     /// @dev Mapping from round ID to distribution status
     mapping(uint256 => bool) public distributed;
+
+    /// @notice Mapping from idea ID to locked author stake amount
+    /// @dev Appended in v1.1.1 to preserve the original proxy storage layout
+    mapping(uint256 => uint256) public authorStakeByIdea;
 
     /* ========== INITIALIZE ========== */
 
@@ -132,6 +136,41 @@ contract FundingPoolUpgradeable is
         totalPoolBalance += amount;
 
         emit FundsDeposited(msg.sender, amount);
+        emit PoolBalanceUpdated(totalPoolBalance);
+    }
+
+    /**
+     * @notice Deposits author stake for a newly created idea
+     * @dev Can only be called by the IdeaRegistry contract.
+     *      This is separate from voter deposits because the amount is locked
+     *      against the idea itself and can later be slashed into `protocolReserve`
+     *      if the idea is rejected.
+     * @param from Address from which tokens are transferred
+     * @param ideaId ID of the idea being created
+     * @param amount Amount of tokens to deposit
+     */
+    function depositAuthorStakeFrom(
+        address from,
+        uint256 ideaId,
+        uint256 amount
+    ) external onlyIdeaRegistry nonReentrant {
+        if (from == address(0)) {
+            revert ZeroAddress("from");
+        }
+        if (ideaId == 0) {
+            revert InvalidId("ideaId");
+        }
+        if (amount == 0) {
+            revert ZeroAmount();
+        }
+
+        governanceToken.safeTransferFrom(from, address(this), amount);
+
+        donorBalances[from] += amount;
+        authorStakeByIdea[ideaId] += amount;
+        totalPoolBalance += amount;
+
+        emit AuthorStakeDeposited(ideaId, from, amount);
         emit PoolBalanceUpdated(totalPoolBalance);
     }
 
@@ -196,9 +235,6 @@ contract FundingPoolUpgradeable is
       nonReentrant 
       whenNotPaused 
     {
-        if (distributed[roundId]) {
-            revert AlreadyDistributed(roundId);
-        }
         if (amount == 0) {
             revert ZeroAmount();
         }
@@ -214,12 +250,11 @@ contract FundingPoolUpgradeable is
         }
 
         uint256 remaining = available - amount;
-        _poolByRoundAndIdea[roundId][ideaId] = 0;
-        if (remaining > 0) {
-            protocolReserve += remaining;
-        }
+        _poolByRoundAndIdea[roundId][ideaId] = remaining;
         totalPoolBalance -= amount;
-        distributed[roundId] = true;
+        if (remaining == 0) {
+            distributed[roundId] = true;
+        }
         
         distributionHistory.push(Distribution({
             roundId: roundId,
@@ -232,6 +267,68 @@ contract FundingPoolUpgradeable is
 
         emit FundsDistributed(roundId, ideaId, amount);
         emit PoolBalanceUpdated(totalPoolBalance);
+    }
+
+    /**
+     * @notice Moves a portion of idea-allocated funds into protocol reserve
+     * @dev Can only be called by the distributor role.
+     *      Used by `GrantManager` when the protocol share is carved out of the
+     *      winning idea before author tranches start being paid.
+     * @param roundId Grant round identifier
+     * @param ideaId Winning idea identifier
+     * @param amount Amount to move into reserve
+     */
+    function moveIdeaFundsToReserve(
+        uint256 roundId,
+        uint256 ideaId,
+        uint256 amount
+    ) external onlyDistributor nonReentrant whenNotPaused {
+        if (roundId == 0) {
+            revert InvalidId("roundId");
+        }
+        if (ideaId == 0) {
+            revert InvalidId("ideaId");
+        }
+        if (amount == 0) {
+            revert ZeroAmount();
+        }
+
+        uint256 available = _poolByRoundAndIdea[roundId][ideaId];
+        if (amount > available) {
+            revert InsufficientIdeaBalance(roundId, ideaId, available, amount);
+        }
+
+        uint256 remaining = available - amount;
+        _poolByRoundAndIdea[roundId][ideaId] = remaining;
+        protocolReserve += amount;
+        if (remaining == 0) {
+            distributed[roundId] = true;
+        }
+
+        emit IdeaFundsReserved(roundId, ideaId, amount);
+    }
+
+    /**
+     * @notice Slashes an author's stake into protocol reserve
+     * @dev Can only be called by the IdeaRegistry contract.
+     *      If the stake is already zero, the function exits silently so repeated
+     *      rejection handling does not break downstream state transitions.
+     * @param ideaId ID of the rejected idea
+     */
+    function slashAuthorStakeToReserve(uint256 ideaId) external onlyIdeaRegistry {
+        if (ideaId == 0) {
+            revert InvalidId("ideaId");
+        }
+
+        uint256 amount = authorStakeByIdea[ideaId];
+        if (amount == 0) {
+            return;
+        }
+
+        authorStakeByIdea[ideaId] = 0;
+        protocolReserve += amount;
+
+        emit AuthorStakeSlashed(ideaId, amount);
     }
 
     /* ========== VIEW FUNCTIONS ========== */
@@ -357,7 +454,9 @@ contract FundingPoolUpgradeable is
 
     /**
      * @notice Checks real pool balance
-     * @dev Can only be called by the contract admin
+     * @dev Can only be called by the contract admin.
+     *      Reconciles `totalPoolBalance` with the actual token balance while keeping
+     *      `protocolReserve` accounted for separately.
      */
     function syncBalance() external onlyAdmin {
         uint256 real = governanceToken.balanceOf(address(this));
@@ -402,5 +501,5 @@ contract FundingPoolUpgradeable is
      * @custom:upgrade-safety Always include 50 slots gap in upgradeable contracts
      * @custom:warning Do not remove or reduce this gap in future versions
      */
-    uint256[50] private __gap;
+    uint256[49] private __gap;
 }

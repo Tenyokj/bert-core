@@ -1,15 +1,17 @@
 # GrantManagerUpgradeable
 
 **Summary**
-Orchestrates the grant lifecycle and coordinates distribution after voting.
+Orchestrates the grant lifecycle and coordinates staged distribution after voting.
 
 **Role In System**
 Reads voting results, validates idea eligibility, and triggers distribution from the funding pool.
 
 **Key Features**
 - Validates round completion and winning idea
-- Calculates and distributes author share
-- Updates idea status to Funded
+- Releases initial author share on claim
+- Handles milestone proof submission and reviewer approvals
+- Releases staged payouts in a `30/40/30` flow
+- Updates idea status through `Funded`, `InProcess`, and `Completed`
 - Exposes helper view functions for claimability
 - Pausable for safety
 

@@ -50,6 +50,62 @@ interface IGrantManager {
      */
     event FeeUpdated(uint256 authorSharePercent, uint256 protocolSharePercent);
 
+    /**
+     * @notice Emitted when a milestone proof request is submitted
+     * @param roundId Round identifier
+     * @param ideaId Winning idea ID
+     * @param stage Milestone stage identifier
+     * @param requestId Sequential request identifier for the stage
+     */
+    event MilestoneProofSubmitted(
+        uint256 indexed roundId,
+        uint256 indexed ideaId,
+        uint8 indexed stage,
+        uint256 requestId
+    );
+
+    /**
+     * @notice Emitted when a reviewer votes on a milestone request
+     * @param roundId Round identifier
+     * @param stage Milestone stage identifier
+     * @param reviewer Reviewer address
+     * @param approved Whether the review vote approved the request
+     */
+    event MilestoneReviewed(
+        uint256 indexed roundId,
+        uint8 indexed stage,
+        address indexed reviewer,
+        bool approved
+    );
+
+    /**
+     * @notice Emitted when a milestone payout is approved and released
+     * @param roundId Round identifier
+     * @param ideaId Winning idea ID
+     * @param stage Milestone stage identifier
+     * @param amount Amount released
+     */
+    event MilestoneApproved(
+        uint256 indexed roundId,
+        uint256 indexed ideaId,
+        uint8 indexed stage,
+        uint256 amount
+    );
+
+    /**
+     * @notice Emitted when a milestone request is rejected
+     * @param roundId Round identifier
+     * @param ideaId Winning idea ID
+     * @param stage Milestone stage identifier
+     * @param requestId Sequential request identifier for the stage
+     */
+    event MilestoneRejected(
+        uint256 indexed roundId,
+        uint256 indexed ideaId,
+        uint8 indexed stage,
+        uint256 requestId
+    );
+
     /* ========== EXTERNAL FUNCTIONS ========== */
 
     /**
@@ -58,6 +114,32 @@ interface IGrantManager {
      * @param roundId The ID of the funding round
      */
     function claimGrant(uint256 roundId) external;
+
+    /**
+     * @notice Submits proof for the next eligible milestone payout stage
+     * @param roundId The ID of the funding round
+     * @param stage Milestone stage identifier
+     * @param metadataURI Off-chain metadata pointer with proof materials
+     * @param details Short human-readable summary of the submission
+     */
+    function submitMilestoneProof(
+        uint256 roundId,
+        uint8 stage,
+        string memory metadataURI,
+        string memory details
+    ) external;
+
+    /**
+     * @notice Reviews the active milestone proof request for a round
+     * @param roundId The ID of the funding round
+     * @param stage Milestone stage identifier
+     * @param approved True to approve the request, false to reject
+     */
+    function reviewMilestoneProof(
+        uint256 roundId,
+        uint8 stage,
+        bool approved
+    ) external;
 
     /* ========== VIEW FUNCTIONS ========== */
 
@@ -116,6 +198,41 @@ interface IGrantManager {
      * @return uint256 Protocol share in basis points
      */
     function getProtocolShare() external view returns (uint256);
+
+    /**
+     * @notice Returns payout tracking information for a round
+     */
+    function getGrantPayout(uint256 roundId)
+        external
+        view
+        returns (
+            uint256 ideaId,
+            address author,
+            uint256 totalGrant,
+            uint256 released,
+            bool initialClaimed,
+            bool inProcessPaid,
+            bool completionPaid
+        );
+
+    /**
+     * @notice Returns the latest milestone request state for a round and stage
+     */
+    function getMilestoneRequest(uint256 roundId, uint8 stage)
+        external
+        view
+        returns (
+            uint256 requestId,
+            string memory metadataURI,
+            string memory details,
+            uint256 submittedAt,
+            uint256 lastRejectedAt,
+            uint8 approvals,
+            uint8 rejections,
+            uint8 maxReviewers,
+            uint8 approvalThreshold,
+            bool active
+        );
 
     /* ========== ADMIN FUNCTIONS ========== */
 

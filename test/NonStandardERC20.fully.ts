@@ -109,17 +109,21 @@ describe("Non-standard ERC20 failure paths", function () {
     );
 
     const REPUTATION_MANAGER_ROLE = await roles.REPUTATION_MANAGER_ROLE();
+    const IREGISTRY_ROLE = await roles.IREGISTRY_ROLE();
     await roles.grantSystemRole(REPUTATION_MANAGER_ROLE, await ideaRegistry.getAddress());
+    await roles.grantSystemRole(IREGISTRY_ROLE, await ideaRegistry.getAddress());
+    await ideaRegistry.setFundingPool(await fundingPool.getAddress());
+    await ideaRegistry.setAuthorMinStake(1n);
 
-    await ideaRegistry.connect(user).createIdea("Idea", "Desc", "");
+    await mockToken.mint(user.address, 201n);
+    await mockToken.connect(user).approve(await fundingPool.getAddress(), 201n);
+
+    await ideaRegistry.connect(user).createIdea("Idea", "Desc", "", 1n);
 
     const VOTING_ROLE = await roles.VOTING_ROLE();
     const DISTRIBUTOR_ROLE = await roles.DISTRIBUTOR_ROLE();
     await roles.grantSystemRole(VOTING_ROLE, admin.address);
     await roles.grantSystemRole(DISTRIBUTOR_ROLE, admin.address);
-
-    await mockToken.mint(user.address, 200n);
-    await mockToken.connect(user).approve(await fundingPool.getAddress(), 200n);
 
     await fundingPool.connect(admin).unpause();
     await fundingPool.connect(admin).depositForIdeaFrom(user.address, 1, 1, 200n);

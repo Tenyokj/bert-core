@@ -96,6 +96,22 @@ error InsufficientIdeaBalance(uint256 roundId, uint256 ideaId, uint256 available
 error InsufficientPoolBalance(uint256 available, uint256 requested);
 
 /**
+ * @notice Emitted when an account's token balance is lower than the required amount
+ * @param available Current token balance
+ * @param required Required token amount
+ * @dev Used for pre-flight ERC20 funding checks before external transfers
+ */
+error InsufficientTokenBalance(uint256 available, uint256 required);
+
+/**
+ * @notice Emitted when ERC20 allowance is lower than the required amount
+ * @param available Current approved allowance
+ * @param required Required token amount
+ * @dev Used for pre-flight ERC20 funding checks before external transfers
+ */
+error InsufficientAllowance(uint256 available, uint256 required);
+
+/**
  * @notice Emitted when a contract has already been initialized
  * @dev Prevents re-initialization attacks
  */
@@ -252,6 +268,57 @@ error NoFundsAllocated(uint256 roundId, uint256 ideaId);
  * @dev Typically share must be ≤ 100% (≤ 10000 bps)
  */
 error InvalidShare(uint256 shareBps, uint256 maxAllowed);
+
+/**
+ * @notice Emitted when IdeaRegistry attempts to use FundingPool before it is configured
+ * @dev Author stake flow requires FundingPool address to be set
+ */
+error FundingPoolNotConfigured();
+
+/**
+ * @notice Emitted when a milestone payout request is already active
+ * @param roundId ID of the round tied to the winning idea
+ * @param stage Milestone stage identifier
+ */
+error MilestoneRequestActive(uint256 roundId, uint8 stage);
+
+/**
+ * @notice Emitted when no active milestone request exists for review
+ * @param roundId ID of the round tied to the winning idea
+ * @param stage Milestone stage identifier
+ */
+error NoActiveMilestoneRequest(uint256 roundId, uint8 stage);
+
+/**
+ * @notice Emitted when a rejected milestone request is resubmitted too early
+ * @param roundId ID of the round tied to the winning idea
+ * @param stage Milestone stage identifier
+ * @param retryAt Timestamp when resubmission becomes available
+ */
+error MilestoneCooldownActive(uint256 roundId, uint8 stage, uint256 retryAt);
+
+/**
+ * @notice Emitted when a reviewer tries to vote twice on the same milestone request
+ * @param roundId ID of the round tied to the winning idea
+ * @param stage Milestone stage identifier
+ * @param reviewer Reviewer address
+ */
+error MilestoneAlreadyReviewed(uint256 roundId, uint8 stage, address reviewer);
+
+/**
+ * @notice Emitted when the maximum number of reviewers has already participated
+ * @param roundId ID of the round tied to the winning idea
+ * @param stage Milestone stage identifier
+ * @param maxReviewers Maximum number of reviewer votes allowed
+ */
+error ReviewerLimitReached(uint256 roundId, uint8 stage, uint256 maxReviewers);
+
+/**
+ * @notice Emitted when an operation is not valid for the current milestone stage
+ * @param roundId ID of the round tied to the winning idea
+ * @param stage Milestone stage identifier
+ */
+error MilestoneNotEligible(uint256 roundId, uint8 stage);
 
 
 // ========== Voting System Errors ==========
@@ -621,3 +688,12 @@ error BatchSizeExceeded(uint256 size, uint256 max);
  * @dev Used for try/catch blocks with external calls
  */
 error ExternalCallFailed(string contractName, string functionName);
+
+
+/**
+ * @notice Emitted when sender votes for own idea
+ * @param voter Address of sender
+ * @param ideaId Id of idea
+ * @dev Used for try/catch blocks with external calls
+ */
+error CannotVoteForOwnIdea(address voter, uint256 ideaId);

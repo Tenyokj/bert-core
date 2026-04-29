@@ -65,10 +65,11 @@ describe("GrantManagerUpgradeable", function () {
 
     const totalAllocated = await fundingPool.poolByRoundAndIdea(1, 1);
     const expectedAuthor = (totalAllocated * 95n) / 100n;
+    const expectedInitialPayout = (expectedAuthor * 30n) / 100n;
 
     await expect(grantManager.connect(user1).claimGrant(1))
       .to.emit(grantManager, "RoundFunded")
-      .withArgs(1n, 1n, expectedAuthor);
+      .withArgs(1n, 1n, expectedInitialPayout);
 
     const idea = await ideaRegistry.getIdea(1);
     expect(idea[7]).to.equal(3n);
@@ -656,6 +657,24 @@ describe("GrantManagerUpgradeable extra coverage", function () {
     ).to.be.revertedWithCustomError(grantManager, "NotAdmin");
   });
 
+  /** @notice it: updates voting system and pause state through admin functions */
+  it("updates voting system and pause state through admin functions", async function () {
+    const { grantManager, votingSystem } = await deploySystem();
+
+    await expect(grantManager.setVotingSystem(await votingSystem.getAddress()))
+      .to.emit(grantManager, "VotingSystemUpdated")
+      .withArgs(await votingSystem.getAddress());
+
+    await grantManager.unpause();
+    expect(await grantManager.isPaused()).to.equal(false);
+
+    await grantManager.pause();
+    expect(await grantManager.isPaused()).to.equal(true);
+
+    await grantManager.unpause();
+    expect(await grantManager.isPaused()).to.equal(false);
+  });
+
   /** @notice it: returns round info when winner exists */
   it("returns round info when winner exists", async function () {
     const {
@@ -737,5 +756,295 @@ describe("GrantManagerUpgradeable extra coverage", function () {
     const res = await grantManager.canClaimGrant(1);
     expect(res[0]).to.equal(false);
     expect(res[1]).to.equal("Grant already distributed");
+  });
+});
+
+/** @notice describe: GrantManagerUpgradeable milestone payouts */
+describe("GrantManagerUpgradeable milestone payouts", function () {
+  async function setupMilestoneRound() {
+    const context = await deploySystem();
+    const {
+      admin,
+      user1,
+      user2,
+      user3,
+      user4,
+      user5,
+      voterProgression,
+      ideaRegistry,
+      votingSystem,
+      fundingPool,
+      governanceToken,
+      grantManager,
+      networkHelpers,
+    } = context;
+
+    await fundingPool.connect(admin).unpause();
+    await votingSystem.connect(admin).unpause();
+    await grantManager.connect(admin).unpause();
+
+    await createIdeas(ideaRegistry, user1, 30);
+
+    const now = await networkHelpers.time.latest();
+    await networkHelpers.time.increaseTo(now + 700);
+    await votingSystem.startVotingRound();
+
+    const minStake = await votingSystem.minStake();
+    await governanceToken.mint(user2.address, minStake * 2n);
+    await governanceToken
+      .connect(user2)
+      .approve(await fundingPool.getAddress(), minStake * 2n);
+    await votingSystem.connect(user2).vote(1, 1, minStake);
+
+    const roundInfo = await votingSystem.getRoundInfo(1);
+    await networkHelpers.time.increaseTo(Number(roundInfo[3]) + 1);
+    await votingSystem.endVotingRound(1);
+
+    await voterProgression.grantReviewerRole(user3.address);
+    await voterProgression.grantReviewerRole(user4.address);
+    await voterProgression.grantReviewerRole(user5.address);
+
+    return context;
+  }
+
+  it("releases 30/40/30 payouts across milestone approvals", async function () {
+    const {
+      user1,
+      user3,
+      user4,
+      user5,
+      fundingPool,
+      ideaRegistry,
+      grantManager,
+    } = await setupMilestoneRound();
+
+    const totalAllocated = await fundingPool.poolByRoundAndIdea(1, 1);
+    const totalGrant = (totalAllocated * 95n) / 100n;
+    const initialPayout = (totalGrant * 30n) / 100n;
+    const inProcessPayout = (totalGrant * 40n) / 100n;
+    const finalPayout = totalGrant - initialPayout - inProcessPayout;
+
+    await grantManager.connect(user1).claimGrant(1);
+
+    let payout = await grantManager.getGrantPayout(1);
+    expect(payout[2]).to.equal(totalGrant);
+    expect(payout[3]).to.equal(initialPayout);
+    expect(payout[4]).to.equal(true);
+
+    await expect(
+      grantManager
+        .connect(user1)
+        .submitMilestoneProof(1, 1, "ipfs://demo-proof", "demo ready")
+    )
+      .to.emit(grantManager, "MilestoneProofSubmitted")
+      .withArgs(1n, 1n, 1n, 1n);
+
+    await grantManager.connect(user3).reviewMilestoneProof(1, 1, true);
+    await grantManager.connect(user4).reviewMilestoneProof(1, 1, true);
+
+    await expect(grantManager.connect(user5).reviewMilestoneProof(1, 1, true))
+      .to.emit(grantManager, "MilestoneApproved")
+      .withArgs(1n, 1n, 1n, inProcessPayout);
+
+    expect(await ideaRegistry.getStatus(1)).to.equal(6);
+
+    payout = await grantManager.getGrantPayout(1);
+    expect(payout[3]).to.equal(initialPayout + inProcessPayout);
+    expect(payout[5]).to.equal(true);
+
+    await grantManager
+      .connect(user1)
+      .submitMilestoneProof(1, 2, "ipfs://final-proof", "project shipped");
+
+    await grantManager.connect(user3).reviewMilestoneProof(1, 2, true);
+    await expect(grantManager.connect(user4).reviewMilestoneProof(1, 2, true))
+      .to.emit(grantManager, "MilestoneApproved")
+      .withArgs(1n, 1n, 2n, finalPayout);
+
+    expect(await ideaRegistry.getStatus(1)).to.equal(5);
+
+    payout = await grantManager.getGrantPayout(1);
+    expect(payout[3]).to.equal(totalGrant);
+    expect(payout[6]).to.equal(true);
+    expect(await fundingPool.isDistributed(1)).to.equal(true);
+  });
+
+  it("enforces milestone rejection cooldown before resubmission", async function () {
+    const {
+      user1,
+      user3,
+      user4,
+      user5,
+      grantManager,
+      networkHelpers,
+    } = await setupMilestoneRound();
+
+    await grantManager.connect(user1).claimGrant(1);
+    await grantManager
+      .connect(user1)
+      .submitMilestoneProof(1, 1, "ipfs://demo-proof", "demo ready");
+
+    await grantManager.connect(user3).reviewMilestoneProof(1, 1, false);
+    await grantManager.connect(user4).reviewMilestoneProof(1, 1, false);
+
+    await expect(grantManager.connect(user5).reviewMilestoneProof(1, 1, false))
+      .to.emit(grantManager, "MilestoneRejected")
+      .withArgs(1n, 1n, 1n, 1n);
+
+    const request = await grantManager.getMilestoneRequest(1, 1);
+    expect(request[9]).to.equal(false);
+
+    await expect(
+      grantManager
+        .connect(user1)
+        .submitMilestoneProof(1, 1, "ipfs://retry", "retry now")
+    ).to.be.revertedWithCustomError(grantManager, "MilestoneCooldownActive");
+
+    await networkHelpers.time.increase(48 * 60 * 60 + 1);
+
+    await expect(
+      grantManager
+        .connect(user1)
+        .submitMilestoneProof(1, 1, "ipfs://retry", "retry later")
+    )
+      .to.emit(grantManager, "MilestoneProofSubmitted")
+      .withArgs(1n, 1n, 1n, 2n);
+  });
+
+  it("validates milestone submission and review edge cases", async function () {
+    const {
+      user1,
+      user2,
+      user3,
+      user4,
+      user5,
+      voterProgression,
+      grantManager,
+    } = await setupMilestoneRound();
+
+    await expect(
+      grantManager.connect(user1).submitMilestoneProof(1, 1, "", "demo ready")
+    ).to.be.revertedWithCustomError(grantManager, "ZeroLength")
+      .withArgs("metadataURI");
+
+    await expect(
+      grantManager.connect(user1).submitMilestoneProof(1, 9, "ipfs://bad", "demo ready")
+    ).to.be.revertedWithCustomError(grantManager, "MilestoneNotEligible")
+      .withArgs(1n, 9n);
+
+    await grantManager.connect(user1).claimGrant(1);
+
+    await expect(
+      grantManager.connect(user2).submitMilestoneProof(1, 1, "ipfs://demo-proof", "demo ready")
+    ).to.be.revertedWithCustomError(grantManager, "NotAuthor");
+
+    await grantManager
+      .connect(user1)
+      .submitMilestoneProof(1, 1, "ipfs://demo-proof", "demo ready");
+
+    await expect(
+      grantManager.connect(user1).submitMilestoneProof(1, 1, "ipfs://duplicate", "duplicate")
+    ).to.be.revertedWithCustomError(grantManager, "MilestoneRequestActive")
+      .withArgs(1n, 1n);
+
+    await expect(
+      grantManager.connect(user1).reviewMilestoneProof(1, 1, true)
+    ).to.be.revertedWithCustomError(grantManager, "NotReviewer");
+
+    await expect(
+      grantManager.connect(user3).reviewMilestoneProof(1, 2, true)
+    ).to.be.revertedWithCustomError(grantManager, "NoActiveMilestoneRequest")
+      .withArgs(1n, 2n);
+
+    await voterProgression.grantReviewerRole(user1.address);
+    await expect(
+      grantManager.connect(user1).reviewMilestoneProof(1, 1, true)
+    ).to.be.revertedWithCustomError(grantManager, "CannotReviewOwnIdea")
+      .withArgs(user1.address);
+
+    await grantManager.connect(user3).reviewMilestoneProof(1, 1, false);
+    await expect(
+      grantManager.connect(user3).reviewMilestoneProof(1, 1, true)
+    ).to.be.revertedWithCustomError(grantManager, "MilestoneAlreadyReviewed")
+      .withArgs(1n, 1n, user3.address);
+
+    await grantManager.connect(user4).reviewMilestoneProof(1, 1, false);
+    await grantManager.connect(user5).reviewMilestoneProof(1, 1, false);
+  });
+
+  it("exposes milestone getters for active and settled requests", async function () {
+    const context = await deploySystem();
+    const {
+      admin,
+      user1,
+      user2,
+      user3,
+      user4,
+      user5,
+      voterProgression,
+      ideaRegistry,
+      votingSystem,
+      fundingPool,
+      governanceToken,
+      grantManager,
+      networkHelpers,
+    } = context;
+
+    await fundingPool.connect(admin).unpause();
+    await votingSystem.connect(admin).unpause();
+    await grantManager.connect(admin).unpause();
+
+    await createIdeas(ideaRegistry, user1, 30);
+
+    const now = await networkHelpers.time.latest();
+    await networkHelpers.time.increaseTo(now + 700);
+    await votingSystem.startVotingRound();
+
+    const minStake = await votingSystem.minStake();
+    await governanceToken.mint(user2.address, minStake * 2n);
+    await governanceToken
+      .connect(user2)
+      .approve(await fundingPool.getAddress(), minStake * 2n);
+    await votingSystem.connect(user2).vote(1, 1, minStake);
+
+    const roundInfo = await votingSystem.getRoundInfo(1);
+    await networkHelpers.time.increaseTo(Number(roundInfo[3]) + 1);
+    await votingSystem.endVotingRound(1);
+
+    await voterProgression.grantReviewerRole(user3.address);
+    await voterProgression.grantReviewerRole(user4.address);
+    await voterProgression.grantReviewerRole(user5.address);
+
+    await grantManager.connect(user1).claimGrant(1);
+    await grantManager
+      .connect(user1)
+      .submitMilestoneProof(1, 1, "ipfs://demo-proof", "demo ready");
+
+    const request = await grantManager.getMilestoneRequest(1, 1);
+    expect(request[0]).to.equal(1n);
+    expect(request[1]).to.equal("ipfs://demo-proof");
+    expect(request[2]).to.equal("demo ready");
+    expect(request[7]).to.equal(5n);
+    expect(request[8]).to.equal(3n);
+    expect(request[9]).to.equal(true);
+
+    await grantManager.connect(user3).reviewMilestoneProof(1, 1, false);
+    await grantManager.connect(user4).reviewMilestoneProof(1, 1, false);
+    await grantManager.connect(user5).reviewMilestoneProof(1, 1, false);
+
+    const payout = await grantManager.getGrantPayout(1);
+    expect(payout[0]).to.equal(1n);
+    expect(payout[1]).to.equal(user1.address);
+    expect(payout[4]).to.equal(true);
+    expect(payout[5]).to.equal(false);
+
+    const settledRequest = await grantManager.getMilestoneRequest(1, 1);
+    expect(settledRequest[5]).to.equal(0n);
+    expect(settledRequest[6]).to.equal(3n);
+    expect(settledRequest[9]).to.equal(false);
+
+    const emptyStage = await grantManager.getMilestoneRequest(1, 2);
+    expect(emptyStage[0]).to.equal(0n);
+    expect(emptyStage[9]).to.equal(false);
   });
 });

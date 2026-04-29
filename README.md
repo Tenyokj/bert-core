@@ -1,4 +1,4 @@
-![Bert v1.0.0](https://img.shields.io/badge/Bert-v1.0.0-6B8E23) ![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green)
+![Bert v1.1.0](https://img.shields.io/badge/Bert-v1.1.0-6B8E23) ![License: GPL-3.0](https://img.shields.io/badge/License-GPL--3.0-green)
 ![Node.js >=22](https://img.shields.io/badge/Node.js->=22-brightgreen) ![TypeScript 5.8.0](https://img.shields.io/badge/TypeScript-5.8.0-3178C6) ![Hardhat 3.0.15](https://img.shields.io/badge/Hardhat-3.0.1-yellow) ![Solidity](https://img.shields.io/badge/Solidity-^0.8.20-orange) ![Upgradeable](https://img.shields.io/badge/Upgradeable-UUPS-blueviolet) ![DAO](https://img.shields.io/badge/DAO-Governance-purple)
 ![Ethers 6.15.0](https://img.shields.io/badge/Ethers-6.15.0-3C3C3D) ![Tests: Unit passing](https://img.shields.io/badge/Tests%3A%20Unit-passing-success) ![Tests: Coverage >95%](https://img.shields.io/badge/coverage-95%25-orange)
 ![Tests: Integration: Scratch passing](https://img.shields.io/badge/Tests%3A%20Integration%3A%20Scratch-passing-success) ![Tests: Integration: Sepolia Fork passing](https://img.shields.io/badge/Tests%3A%20Integration%3A%20Sepolia%20Fork-passing-success) ![Linters passing](https://img.shields.io/badge/Linters-passing-success)
@@ -41,11 +41,12 @@ See: [docs/CONTRACTS.md](docs/CONTRACTS.md)
 1. Architecture: [ARCHITECTURE.md](docs/ARCHITECTURE.md)
 2. Security: [SECURITY.md](docs/SECURITY.md)
 3. Upgrades: [UPGRADES.md](docs/UPGRADES.md)
-4. Configuration: [CONFIG.md](docs/CONFIG.md)
-5. Operations: [OPERATIONS.md](docs/OPERATIONS.md)
-6. FAQ: [FAQ.md](docs/FAQ.md)
-7. Glossary: [GLOSSARY.md](docs/GLOSSARY.md)
-8. Getting Started: [GETTING_STARTED.md](docs/GETTING_STARTED.md)
+4. Changelog: [CHANGELOG.md](docs/CHANGELOG.md)
+5. Configuration: [CONFIG.md](docs/CONFIG.md)
+6. Operations: [OPERATIONS.md](docs/OPERATIONS.md)
+7. FAQ: [FAQ.md](docs/FAQ.md)
+8. Glossary: [GLOSSARY.md](docs/GLOSSARY.md)
+9. Getting Started: [GETTING_STARTED.md](docs/GETTING_STARTED.md)
 
 **Disclaimer**
 This repository contains the core smart contracts of the protocol. The codebase may evolve rapidly, so older guides may not match the current layout. Refer to the latest docs for accurate integration guidance.

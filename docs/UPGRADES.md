@@ -41,6 +41,11 @@
 2. Upgrade proxy via ProxyAdmin
 3. Validate `version()` and new storage field
 
+**Recent Upgrade Notes**
+1. `v1.1.0` adds author stake locking, milestone-based grant payouts, and milestone review storage
+2. `IdeaStatus` keeps legacy enum ordering stable, with `InProcess` appended to avoid shifting previous enum values
+3. New storage for `GrantManagerUpgradeable`, `FundingPoolUpgradeable`, and `IdeaRegistryUpgradeable` is appended after existing storage to preserve upgrade safety
+
 **Post-Upgrade Checks**
 1. Read EIP-1967 implementation slot
 2. Validate key parameters and role wiring
