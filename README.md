@@ -5,6 +5,13 @@
 
 ![LOGO](/docs/assets/banner.png)
 
+# Name of your old project
+
+[![Status](https://img.shields.io/badge/status-deprecated-red.svg)](https://github.com/Tenyokj/bert-core-arc)
+
+> **⚠️ ATTENTION:** This repository has been moved and is no longer being updated.
+> Please use the latest version: **[Tenyokj/bert-core-arc](https://github.com/Tenyokj/bert-core-arc)**.
+
 **BERT**
 is an upgradeable DAO voting & grant system that turns community proposals into funded outcomes. Users submit ideas, vote with stake, and receive transparent, on-chain grant distribution.
 
